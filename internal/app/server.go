@@ -26,6 +26,7 @@ var embeddedFiles embed.FS
 
 type Server struct {
 	store      *storage.HostStore
+	creds      storage.CredentialStore
 	files      fileService
 	mux        *http.ServeMux
 	httpServer *http.Server
@@ -44,16 +45,22 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 
-	return newServerWithDependencies(store, session.NewFileService(store)), nil
+	creds, err := storage.NewCredentialStore("zshell")
+	if err != nil {
+		return nil, err
+	}
+
+	return newServerWithDependencies(store, creds, session.NewFileService(store, creds)), nil
 }
 
 func newServerWithStore(store *storage.HostStore) *Server {
-	return newServerWithDependencies(store, session.NewFileService(store))
+	return newServerWithDependencies(store, noopCredentialStore{}, session.NewFileService(store, noopCredentialStore{}))
 }
 
-func newServerWithDependencies(store *storage.HostStore, files fileService) *Server {
+func newServerWithDependencies(store *storage.HostStore, creds storage.CredentialStore, files fileService) *Server {
 	server := &Server{
 		store: store,
+		creds: creds,
 		files: files,
 		mux:   http.NewServeMux(),
 	}
@@ -135,7 +142,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
 	s.mux.HandleFunc("/api/hosts/", s.handleHostByID)
 	s.mux.HandleFunc("/api/files/", s.handleFiles)
-	s.mux.Handle("/ws/sessions", session.NewSSHHandler(s.store))
+	s.mux.Handle("/ws/sessions", session.NewSSHHandler(s.store, s.creds))
 
 	distFS, err := fs.Sub(embeddedFiles, "frontend/dist")
 	if err != nil {
@@ -253,6 +260,7 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		hosts = s.decorateHosts(hosts)
 		writeJSON(w, http.StatusOK, hosts)
 	case http.MethodPost:
 		var host models.Host
@@ -260,7 +268,7 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		saved, err := s.store.Save(host)
+		saved, err := s.saveHost(host)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -286,7 +294,7 @@ func (s *Server) handleHostByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		host.ID = id
-		saved, err := s.store.Save(host)
+		saved, err := s.saveHost(host)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -301,10 +309,72 @@ func (s *Server) handleHostByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status, err)
 			return
 		}
+		_ = s.creds.Delete(id)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) saveHost(host models.Host) (models.Host, error) {
+	host = host.Normalize()
+	host.HasPassword = false
+
+	if host.ID == "" {
+		id, err := models.NewID()
+		if err != nil {
+			return models.Host{}, err
+		}
+		host.ID = id
+	}
+
+	if host.AuthType == models.AuthPassword {
+		if host.SavePassword && host.Password != "" {
+			if err := s.creds.Set(host.ID, host.Password); err != nil {
+				return models.Host{}, err
+			}
+		} else if !host.SavePassword {
+			if err := s.creds.Delete(host.ID); err != nil {
+				return models.Host{}, err
+			}
+		}
+	} else {
+		if err := s.creds.Delete(host.ID); err != nil {
+			return models.Host{}, err
+		}
+	}
+
+	host.Password = ""
+	host.HasPassword = false
+	host.SavePassword = false
+
+	saved, err := s.store.Save(host)
+	if err != nil {
+		return models.Host{}, err
+	}
+	return s.decorateHost(saved), nil
+}
+
+func (s *Server) decorateHosts(hosts []models.Host) []models.Host {
+	decorated := make([]models.Host, 0, len(hosts))
+	for _, host := range hosts {
+		decorated = append(decorated, s.decorateHost(host))
+	}
+	return decorated
+}
+
+func (s *Server) decorateHost(host models.Host) models.Host {
+	host.Password = ""
+	host.SavePassword = false
+	host.HasPassword = false
+	if host.AuthType != models.AuthPassword || s.creds == nil {
+		return host
+	}
+	password, ok, err := s.creds.Get(host.ID)
+	if err == nil && ok && password != "" {
+		host.HasPassword = true
+	}
+	return host
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -330,4 +400,18 @@ func openBrowser(url string) {
 	if err := cmd.Start(); err != nil {
 		log.Printf("open browser: %v", err)
 	}
+}
+
+type noopCredentialStore struct{}
+
+func (noopCredentialStore) Get(hostID string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (noopCredentialStore) Set(hostID, password string) error {
+	return nil
+}
+
+func (noopCredentialStore) Delete(hostID string) error {
+	return nil
 }

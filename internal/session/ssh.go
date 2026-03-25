@@ -29,12 +29,14 @@ type sshEnvelope struct {
 
 type SSHHandler struct {
 	store    *storage.HostStore
+	creds    storage.CredentialStore
 	upgrader websocket.Upgrader
 }
 
-func NewSSHHandler(store *storage.HostStore) *SSHHandler {
+func NewSSHHandler(store *storage.HostStore, creds storage.CredentialStore) *SSHHandler {
 	return &SSHHandler{
 		store: store,
+		creds: creds,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -70,7 +72,13 @@ func (h *SSHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	writeEnvelope(conn, sshEnvelope{Type: "status", Message: "connecting"})
 
-	client, sshSession, stdin, err := connect(host, initMsg.Password, initMsg.Cols, initMsg.Rows)
+	password, err := resolvePassword(h.creds, host, initMsg.Password)
+	if err != nil {
+		writeEnvelope(conn, sshEnvelope{Type: "error", Message: err.Error()})
+		return
+	}
+
+	client, sshSession, stdin, err := connect(host, password, initMsg.Cols, initMsg.Rows)
 	if err != nil {
 		writeEnvelope(conn, sshEnvelope{Type: "error", Message: err.Error()})
 		return
@@ -269,4 +277,24 @@ func authMethodForHost(host models.Host, password string) (ssh.AuthMethod, error
 
 func writeEnvelope(conn *websocket.Conn, msg sshEnvelope) {
 	_ = conn.WriteJSON(msg)
+}
+
+func resolvePassword(creds storage.CredentialStore, host models.Host, password string) (string, error) {
+	if host.AuthType != models.AuthPassword {
+		return "", nil
+	}
+	if password != "" {
+		return password, nil
+	}
+	if creds == nil {
+		return "", errors.New("password is required")
+	}
+	saved, ok, err := creds.Get(host.ID)
+	if err != nil {
+		return "", err
+	}
+	if ok && saved != "" {
+		return saved, nil
+	}
+	return "", errors.New("password is required")
 }

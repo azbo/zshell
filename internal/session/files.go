@@ -17,14 +17,20 @@ import (
 
 type FileService struct {
 	store *storage.HostStore
+	creds storage.CredentialStore
 }
 
-func NewFileService(store *storage.HostStore) *FileService {
-	return &FileService{store: store}
+func NewFileService(store *storage.HostStore, creds storage.CredentialStore) *FileService {
+	return &FileService{store: store, creds: creds}
 }
 
 func (s *FileService) List(hostID, password, remotePath string) (models.RemoteListing, error) {
 	host, err := s.lookupHost(hostID)
+	if err != nil {
+		return models.RemoteListing{}, err
+	}
+
+	password, err = resolvePassword(s.creds, host, password)
 	if err != nil {
 		return models.RemoteListing{}, err
 	}
@@ -78,6 +84,11 @@ func (s *FileService) Upload(hostID, password, remotePath, fileName string, read
 		return models.RemoteEntry{}, err
 	}
 
+	password, err = resolvePassword(s.creds, host, password)
+	if err != nil {
+		return models.RemoteEntry{}, err
+	}
+
 	client, err := dialSSH(host, password)
 	if err != nil {
 		return models.RemoteEntry{}, err
@@ -118,6 +129,11 @@ func (s *FileService) Upload(hostID, password, remotePath, fileName string, read
 
 func (s *FileService) Download(hostID, password, remotePath string) (io.ReadCloser, string, error) {
 	host, err := s.lookupHost(hostID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	password, err = resolvePassword(s.creds, host, password)
 	if err != nil {
 		return nil, "", err
 	}

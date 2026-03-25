@@ -64,6 +64,48 @@ func TestCreateAndListHost(t *testing.T) {
 	}
 }
 
+func TestListHostsDecoratesCredentialState(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewHostStore(filepath.Join(t.TempDir(), "hosts.json"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if _, err := store.Save(models.Host{
+		Name:     "demo",
+		Address:  "127.0.0.1",
+		Port:     22,
+		Username: "root",
+		Platform: models.PlatformLinux,
+		AuthType: models.AuthPassword,
+	}); err != nil {
+		t.Fatalf("save host: %v", err)
+	}
+
+	server := newServerWithDependencies(store, fakeCredentialStore{}, fakeFileService{})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/hosts", nil)
+	server.mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	var payload []models.Host
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(payload))
+	}
+	if !payload[0].HasPassword {
+		t.Fatal("expected hasPassword to be true")
+	}
+	if payload[0].Password != "" {
+		t.Fatal("expected password to be omitted from API response")
+	}
+}
+
 func TestListFilesRoute(t *testing.T) {
 	t.Parallel()
 
@@ -83,7 +125,7 @@ func TestListFilesRoute(t *testing.T) {
 		t.Fatalf("save host: %v", err)
 	}
 
-	server := newServerWithDependencies(store, fakeFileService{})
+	server := newServerWithDependencies(store, fakeCredentialStore{}, fakeFileService{})
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/files/"+saved.ID+"/list", strings.NewReader(`{"path":".","password":"secret"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -110,6 +152,20 @@ func testServer(t *testing.T) *Server {
 		t.Fatalf("new store: %v", err)
 	}
 	return newServerWithStore(store)
+}
+
+type fakeCredentialStore struct{}
+
+func (fakeCredentialStore) Get(hostID string) (string, bool, error) {
+	return "secret", true, nil
+}
+
+func (fakeCredentialStore) Set(hostID, password string) error {
+	return nil
+}
+
+func (fakeCredentialStore) Delete(hostID string) error {
+	return nil
 }
 
 type fakeFileService struct{}

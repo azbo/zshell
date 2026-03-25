@@ -158,7 +158,7 @@ export function bootstrap() {
           </div>
           <div class="editor-mode">
             <span id="form-mode">新增</span>
-            <small>主机配置只存结构信息，密码不会持久化</small>
+            <small>密码可选保存到系统凭据库，未保存时仅在当前会话缓存</small>
           </div>
           <form id="host-form" class="host-form">
             <label><span>名称</span><input name="name" required /></label>
@@ -183,7 +183,8 @@ export function bootstrap() {
                 </select>
               </label>
             </div>
-            <label><span>密码</span><input name="password" type="password" placeholder="可选：保存在本地配置" /></label>
+            <label><span>密码</span><input name="password" type="password" placeholder="留空则保持当前已保存密码" /></label>
+            <label class="check-row"><input name="savePassword" type="checkbox" /><span>保存密码到系统凭据库</span></label>
             <label><span>密钥路径</span><input name="keyPath" placeholder="C:\\Users\\me\\.ssh\\id_rsa" /></label>
             <label><span>默认 Shell</span><input name="defaultShell" placeholder="bash -l / powershell.exe -NoLogo" /></label>
             <div class="actions">
@@ -367,12 +368,13 @@ function bindUI(elements: Elements, state: State) {
       platform: String(formData.get("platform") || "linux") as Platform,
       authType: String(formData.get("authType") || "password") as AuthType,
       password: String(formData.get("password") || "").trim(),
+      savePassword: Boolean(formData.get("savePassword")),
       keyPath: String(formData.get("keyPath") || "").trim(),
       defaultShell: String(formData.get("defaultShell") || "").trim(),
     };
 
     try {
-    const saved = await saveHost(payload, state.editingId);
+      const saved = await saveHost(payload, state.editingId);
       state.editingId = saved.id;
       state.selectedHostId = saved.id;
       state.editorOpen = false;
@@ -433,6 +435,7 @@ function renderHostGroup(root: HTMLDivElement, title: string, hosts: Host[], sta
       </button>
       <div class="tree-actions">
         <span class="tree-state ${activeSession?.status || "idle"}"></span>
+        ${host.hasPassword ? `<span class="mini-meta">钥</span>` : ""}
         <button class="mini-button connect-button" type="button">连接</button>
       </div>
     `;
@@ -476,6 +479,7 @@ function openNewEditor(elements: Elements, state: State) {
   setInput(elements.hostForm, "platform", "linux");
   setInput(elements.hostForm, "authType", "password");
   setInput(elements.hostForm, "password", "");
+  setCheckbox(elements.hostForm, "savePassword", false);
   setInput(elements.hostForm, "keyPath", "");
   setInput(elements.hostForm, "defaultShell", "");
   renderEditor(elements, state);
@@ -492,7 +496,8 @@ function fillForm(elements: Elements, state: State, host: Host) {
   setInput(elements.hostForm, "username", host.username);
   setInput(elements.hostForm, "platform", host.platform);
   setInput(elements.hostForm, "authType", host.authType);
-  setInput(elements.hostForm, "password", host.password || "");
+  setInput(elements.hostForm, "password", "");
+  setCheckbox(elements.hostForm, "savePassword", !!host.hasPassword);
   setInput(elements.hostForm, "keyPath", host.keyPath || "");
   setInput(elements.hostForm, "defaultShell", host.defaultShell || "");
   renderEditor(elements, state);
@@ -508,6 +513,13 @@ function setInput(form: HTMLFormElement, name: string, value: string) {
   const element = form.elements.namedItem(name);
   if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
     element.value = value;
+  }
+}
+
+function setCheckbox(form: HTMLFormElement, name: string, checked: boolean) {
+  const element = form.elements.namedItem(name);
+  if (element instanceof HTMLInputElement && element.type === "checkbox") {
+    element.checked = checked;
   }
 }
 
@@ -900,9 +912,8 @@ async function ensurePassword(host: Host, state: State, forcePrompt = false) {
     return "";
   }
   if (!forcePrompt) {
-    if (host.password) {
-      state.passwordCache.set(host.id, host.password);
-      return host.password;
+    if (host.hasPassword) {
+      return "";
     }
     const cached = state.passwordCache.get(host.id);
     if (cached) {

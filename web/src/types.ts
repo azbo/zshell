@@ -10,6 +10,8 @@ export type Host = {
   platform: Platform;
   authType: AuthType;
   password?: string;
+  hasPassword?: boolean;
+  savePassword?: boolean;
   keyPath?: string;
   defaultShell?: string;
 };

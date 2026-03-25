@@ -25,6 +25,8 @@ type Host struct {
 	Platform     string `json:"platform"`
 	AuthType     string `json:"authType"`
 	Password     string `json:"password,omitempty"`
+	HasPassword  bool   `json:"hasPassword,omitempty"`
+	SavePassword bool   `json:"savePassword,omitempty"`
 	KeyPath      string `json:"keyPath,omitempty"`
 	DefaultShell string `json:"defaultShell,omitempty"`
 }
