@@ -1,0 +1,5 @@
+web/node_modules/
+frontend/node_modules/
+build/bin/
+zshell-desktop/
+zshell.exe
