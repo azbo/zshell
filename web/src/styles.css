@@ -1,5 +1,8 @@
 :root {
   color-scheme: dark;
+  --session-pane-width: 280px;
+  --editor-pane-width: 360px;
+  --file-pane-height: 250px;
   --bg: #141414;
   --bg-soft: #1a1a1a;
   --bg-panel: #202020;
@@ -35,6 +38,20 @@ button,
 input,
 select {
   font: inherit;
+}
+
+body.resizing {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 button {
@@ -129,8 +146,9 @@ button {
 }
 
 .layout {
+  position: relative;
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr) 340px;
+  grid-template-columns: var(--session-pane-width) minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -153,14 +171,22 @@ button {
 
 .terminal-pane {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) 250px;
+  grid-template-rows: auto auto minmax(240px, 1fr) 6px var(--file-pane-height);
   background: #181818;
 }
 
 .editor-pane {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--editor-pane-width);
+  z-index: 30;
   border-left: 1px solid var(--line);
   padding: 14px 14px 16px;
   overflow: auto;
+  background: #1b1b1b;
+  box-shadow: var(--shadow);
   transform: translateX(100%);
   transition: transform 160ms ease;
 }
@@ -384,6 +410,24 @@ button {
   background: #101113;
 }
 
+.file-splitter {
+  position: relative;
+  background: #252525;
+  border-top: 1px solid #2f2f2f;
+  border-bottom: 1px solid #0f0f0f;
+  cursor: ns-resize;
+}
+
+.file-splitter::after {
+  content: "";
+  position: absolute;
+  inset: 2px 50%;
+  width: 42px;
+  height: 2px;
+  transform: translateX(-50%);
+  background: #5a5a5a;
+}
+
 .terminal-shell,
 .empty-state {
   width: 100%;
@@ -410,6 +454,7 @@ button {
   grid-template-rows: auto auto 1fr;
   border-top: 1px solid var(--line);
   background: #1b1b1b;
+  min-height: 0;
 }
 
 .file-grid-head,
@@ -520,7 +565,7 @@ button {
 
 @media (max-width: 1320px) {
   .layout {
-    grid-template-columns: 250px minmax(0, 1fr) 300px;
+    grid-template-columns: 250px minmax(0, 1fr);
   }
 }
 
@@ -530,13 +575,10 @@ button {
   }
 
   .editor-pane {
-    position: fixed;
     top: 76px;
     right: 0;
     bottom: 28px;
     width: 320px;
-    z-index: 20;
-    box-shadow: var(--shadow);
   }
 }
 
@@ -554,7 +596,7 @@ button {
   }
 
   .terminal-pane {
-    grid-template-rows: auto auto minmax(320px, 1fr) 240px;
+    grid-template-rows: auto auto minmax(260px, 1fr) 6px minmax(200px, var(--file-pane-height));
   }
 
   .file-grid-head,

@@ -28,6 +28,7 @@ type Elements = {
   deleteHostButton: HTMLButtonElement;
   tabBar: HTMLDivElement;
   terminalStage: HTMLDivElement;
+  fileSplitter: HTMLDivElement;
   statusBanner: HTMLDivElement;
   workspaceTitle: HTMLHeadingElement;
   filePath: HTMLSpanElement;
@@ -54,6 +55,8 @@ type State = {
   fileLoadingHostId: string;
   fileErrorHostId: string;
   fileError: string;
+  filePaneHeight: number;
+  draggingFilePane: boolean;
 };
 
 export function bootstrap() {
@@ -118,6 +121,7 @@ export function bootstrap() {
               <p>左侧像 WindTerm 一样管理会话树，中间保留多标签终端，底部为真实 SFTP 文件面板。</p>
             </div>
           </section>
+          <div id="file-splitter" class="file-splitter" role="separator" aria-orientation="horizontal"></div>
           <section class="file-pane">
             <div class="file-pane-head">
               <div>
@@ -179,6 +183,7 @@ export function bootstrap() {
                 </select>
               </label>
             </div>
+            <label><span>密码</span><input name="password" type="password" placeholder="可选：保存在本地配置" /></label>
             <label><span>密钥路径</span><input name="keyPath" placeholder="C:\\Users\\me\\.ssh\\id_rsa" /></label>
             <label><span>默认 Shell</span><input name="defaultShell" placeholder="bash -l / powershell.exe -NoLogo" /></label>
             <div class="actions">
@@ -211,9 +216,12 @@ export function bootstrap() {
     fileLoadingHostId: "",
     fileErrorHostId: "",
     fileError: "",
+    filePaneHeight: 250,
+    draggingFilePane: false,
   };
 
   bindUI(elements, state);
+  applyPaneHeight(state.filePaneHeight);
   window.addEventListener("resize", () => resizeActiveTerminal(state));
 
   void refreshHosts(elements, state);
@@ -236,6 +244,7 @@ function queryElements(): Elements {
     deleteHostButton: document.querySelector<HTMLButtonElement>("#delete-host")!,
     tabBar: document.querySelector<HTMLDivElement>("#tab-bar")!,
     terminalStage: document.querySelector<HTMLDivElement>("#terminal-stage")!,
+    fileSplitter: document.querySelector<HTMLDivElement>("#file-splitter")!,
     statusBanner: document.querySelector<HTMLDivElement>("#status-banner")!,
     workspaceTitle: document.querySelector<HTMLHeadingElement>("#workspace-title")!,
     filePath: document.querySelector<HTMLSpanElement>("#file-path")!,
@@ -270,6 +279,27 @@ function bindUI(elements: Elements, state: State) {
   elements.hostSearch.addEventListener("input", () => {
     state.search = elements.hostSearch.value.trim().toLowerCase();
     renderHosts(elements, state);
+  });
+  elements.fileSplitter.addEventListener("mousedown", (event) => {
+    state.draggingFilePane = true;
+    document.body.classList.add("resizing");
+    event.preventDefault();
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!state.draggingFilePane) {
+      return;
+    }
+    const nextHeight = Math.max(140, Math.min(window.innerHeight * 0.5, window.innerHeight - event.clientY - 28));
+    state.filePaneHeight = Math.round(nextHeight);
+    applyPaneHeight(state.filePaneHeight);
+    resizeActiveTerminal(state);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!state.draggingFilePane) {
+      return;
+    }
+    state.draggingFilePane = false;
+    document.body.classList.remove("resizing");
   });
 
   elements.fileRefreshButton.addEventListener("click", () => {
@@ -336,6 +366,7 @@ function bindUI(elements: Elements, state: State) {
       username: String(formData.get("username") || ""),
       platform: String(formData.get("platform") || "linux") as Platform,
       authType: String(formData.get("authType") || "password") as AuthType,
+      password: String(formData.get("password") || "").trim(),
       keyPath: String(formData.get("keyPath") || "").trim(),
       defaultShell: String(formData.get("defaultShell") || "").trim(),
     };
@@ -444,6 +475,7 @@ function openNewEditor(elements: Elements, state: State) {
   setInput(elements.hostForm, "username", "");
   setInput(elements.hostForm, "platform", "linux");
   setInput(elements.hostForm, "authType", "password");
+  setInput(elements.hostForm, "password", "");
   setInput(elements.hostForm, "keyPath", "");
   setInput(elements.hostForm, "defaultShell", "");
   renderEditor(elements, state);
@@ -460,6 +492,7 @@ function fillForm(elements: Elements, state: State, host: Host) {
   setInput(elements.hostForm, "username", host.username);
   setInput(elements.hostForm, "platform", host.platform);
   setInput(elements.hostForm, "authType", host.authType);
+  setInput(elements.hostForm, "password", host.password || "");
   setInput(elements.hostForm, "keyPath", host.keyPath || "");
   setInput(elements.hostForm, "defaultShell", host.defaultShell || "");
   renderEditor(elements, state);
@@ -677,6 +710,9 @@ function renderFilePanel(elements: Elements, state: State) {
   if (!host) {
     elements.filePath.textContent = "未连接";
     elements.fileBody.innerHTML = `<div class="file-empty">选择主机后可浏览远程目录。</div>`;
+    elements.fileUpButton.disabled = true;
+    elements.fileRefreshButton.disabled = true;
+    elements.fileUploadButton.disabled = true;
     elements.fileDownloadButton.disabled = true;
     return;
   }
@@ -864,6 +900,10 @@ async function ensurePassword(host: Host, state: State, forcePrompt = false) {
     return "";
   }
   if (!forcePrompt) {
+    if (host.password) {
+      state.passwordCache.set(host.id, host.password);
+      return host.password;
+    }
     const cached = state.passwordCache.get(host.id);
     if (cached) {
       return cached;
@@ -874,6 +914,10 @@ async function ensurePassword(host: Host, state: State, forcePrompt = false) {
     state.passwordCache.set(host.id, password);
   }
   return password;
+}
+
+function applyPaneHeight(height: number) {
+  document.documentElement.style.setProperty("--file-pane-height", `${height}px`);
 }
 
 function currentRemotePath(state: State, host: Host) {

@@ -24,6 +24,7 @@ type Host struct {
 	Username     string `json:"username"`
 	Platform     string `json:"platform"`
 	AuthType     string `json:"authType"`
+	Password     string `json:"password,omitempty"`
 	KeyPath      string `json:"keyPath,omitempty"`
 	DefaultShell string `json:"defaultShell,omitempty"`
 }
@@ -34,6 +35,7 @@ func (h Host) Normalize() Host {
 	h.Username = strings.TrimSpace(h.Username)
 	h.Platform = strings.ToLower(strings.TrimSpace(h.Platform))
 	h.AuthType = strings.ToLower(strings.TrimSpace(h.AuthType))
+	h.Password = strings.TrimSpace(h.Password)
 	h.KeyPath = strings.TrimSpace(h.KeyPath)
 	h.DefaultShell = strings.TrimSpace(h.DefaultShell)
 	if h.Port == 0 {
