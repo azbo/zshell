@@ -36,6 +36,7 @@ type TerminalTab = {
 type SyncGroup = "off" | "a" | "b";
 
 type Elements = {
+  workbench: HTMLDivElement;
   hostTree: HTMLDivElement;
   openSessions: HTMLDivElement;
   hostCount: HTMLSpanElement;
@@ -44,6 +45,10 @@ type Elements = {
   newHostButton: HTMLButtonElement;
   connectSelectedButton: HTMLButtonElement;
   editSelectedButton: HTMLButtonElement;
+  layoutSessionButton: HTMLButtonElement;
+  layoutFilesButton: HTMLButtonElement;
+  layoutStatusButton: HTMLButtonElement;
+  focusModeButton: HTMLButtonElement;
   syncToggleButton: HTMLButtonElement;
   syncOffButton: HTMLButtonElement;
   syncAButton: HTMLButtonElement;
@@ -104,6 +109,10 @@ type State = {
   passwordClearArmed: boolean;
   transferStatus: string;
   syncBroadcastEnabled: boolean;
+  showSessionPane: boolean;
+  showFilePane: boolean;
+  showStatusBar: boolean;
+  focusMode: boolean;
 };
 
 export function bootstrap() {
@@ -129,6 +138,11 @@ export function bootstrap() {
         <button id="new-host" class="toolbar-button accent">新建会话</button>
         <button id="connect-selected" class="toolbar-button">连接所选</button>
         <button id="edit-selected" class="toolbar-button">编辑</button>
+        <div class="toolbar-separator"></div>
+        <button id="layout-session" class="toolbar-button subtle">侧栏</button>
+        <button id="layout-files" class="toolbar-button subtle">文件区</button>
+        <button id="layout-status" class="toolbar-button subtle">状态栏</button>
+        <button id="focus-mode" class="toolbar-button subtle">专注模式</button>
         <div class="toolbar-separator"></div>
         <div id="status-banner" class="status-banner">等待连接</div>
       </div>
@@ -333,10 +347,15 @@ export function bootstrap() {
     passwordClearArmed: false,
     transferStatus: "",
     syncBroadcastEnabled: false,
+    showSessionPane: loadBoolPref("layout.sessionPane", true),
+    showFilePane: loadBoolPref("layout.filePane", true),
+    showStatusBar: loadBoolPref("layout.statusBar", true),
+    focusMode: loadBoolPref("layout.focusMode", false),
   };
 
   bindUI(elements, state);
   applyPaneHeight(state.filePaneHeight);
+  applyLayoutState(elements, state);
   window.addEventListener("resize", () => resizeActiveTerminal(state));
 
   void refreshHosts(elements, state);
@@ -347,6 +366,7 @@ export function bootstrap() {
 
 function queryElements(): Elements {
   return {
+    workbench: document.querySelector<HTMLDivElement>(".workbench")!,
     hostTree: document.querySelector<HTMLDivElement>("#host-tree")!,
     openSessions: document.querySelector<HTMLDivElement>("#open-sessions")!,
     hostCount: document.querySelector<HTMLSpanElement>("#host-count")!,
@@ -355,6 +375,10 @@ function queryElements(): Elements {
     newHostButton: document.querySelector<HTMLButtonElement>("#new-host")!,
     connectSelectedButton: document.querySelector<HTMLButtonElement>("#connect-selected")!,
     editSelectedButton: document.querySelector<HTMLButtonElement>("#edit-selected")!,
+    layoutSessionButton: document.querySelector<HTMLButtonElement>("#layout-session")!,
+    layoutFilesButton: document.querySelector<HTMLButtonElement>("#layout-files")!,
+    layoutStatusButton: document.querySelector<HTMLButtonElement>("#layout-status")!,
+    focusModeButton: document.querySelector<HTMLButtonElement>("#focus-mode")!,
     syncToggleButton: document.querySelector<HTMLButtonElement>("#sync-toggle")!,
     syncOffButton: document.querySelector<HTMLButtonElement>("#sync-off")!,
     syncAButton: document.querySelector<HTMLButtonElement>("#sync-a")!,
@@ -414,6 +438,28 @@ function bindUI(elements: Elements, state: State) {
     state.search = elements.hostSearch.value.trim().toLowerCase();
     renderHosts(elements, state);
   });
+  elements.layoutSessionButton.addEventListener("click", () => {
+    state.showSessionPane = !state.showSessionPane;
+    persistBoolPref("layout.sessionPane", state.showSessionPane);
+    applyLayoutState(elements, state);
+  });
+  elements.layoutFilesButton.addEventListener("click", () => {
+    state.showFilePane = !state.showFilePane;
+    persistBoolPref("layout.filePane", state.showFilePane);
+    applyLayoutState(elements, state);
+    resizeActiveTerminal(state);
+  });
+  elements.layoutStatusButton.addEventListener("click", () => {
+    state.showStatusBar = !state.showStatusBar;
+    persistBoolPref("layout.statusBar", state.showStatusBar);
+    applyLayoutState(elements, state);
+  });
+  elements.focusModeButton.addEventListener("click", () => {
+    state.focusMode = !state.focusMode;
+    persistBoolPref("layout.focusMode", state.focusMode);
+    applyLayoutState(elements, state);
+    resizeActiveTerminal(state);
+  });
   elements.tabSearch.addEventListener("input", () => {
     state.tabSearch = elements.tabSearch.value.trim().toLowerCase();
     renderOpenSessions(elements, state);
@@ -444,6 +490,13 @@ function bindUI(elements: Elements, state: State) {
       event.preventDefault();
       elements.tabSearch.focus();
       elements.tabSearch.select();
+    }
+    if (event.altKey && event.key === "Enter") {
+      event.preventDefault();
+      state.focusMode = !state.focusMode;
+      persistBoolPref("layout.focusMode", state.focusMode);
+      applyLayoutState(elements, state);
+      resizeActiveTerminal(state);
     }
   });
 
@@ -1226,6 +1279,22 @@ function bindFileRows(
   }
 }
 
+function applyLayoutState(elements: Elements, state: State) {
+  elements.workbench.classList.toggle("hide-session-pane", !state.showSessionPane);
+  elements.workbench.classList.toggle("hide-file-pane", !state.showFilePane);
+  elements.workbench.classList.toggle("hide-status-strip", !state.showStatusBar);
+  elements.workbench.classList.toggle("focus-mode", state.focusMode);
+
+  elements.layoutSessionButton.classList.toggle("active", state.showSessionPane);
+  elements.layoutFilesButton.classList.toggle("active", state.showFilePane);
+  elements.layoutStatusButton.classList.toggle("active", state.showStatusBar);
+  elements.focusModeButton.classList.toggle("active", state.focusMode);
+  elements.focusModeButton.textContent = state.focusMode ? "退出专注" : "专注模式";
+  elements.layoutSessionButton.textContent = state.showSessionPane ? "侧栏开" : "侧栏关";
+  elements.layoutFilesButton.textContent = state.showFilePane ? "文件区开" : "文件区关";
+  elements.layoutStatusButton.textContent = state.showStatusBar ? "状态栏开" : "状态栏关";
+}
+
 function routeTerminalInput(elements: Elements, state: State, sourceTabID: string, data: string) {
   const source = state.terminals.get(sourceTabID);
   if (!source) {
@@ -1317,6 +1386,26 @@ function syncGroupBadge(group: SyncGroup) {
       return "B";
     default:
       return "-";
+  }
+}
+
+function loadBoolPref(key: string, fallback: boolean) {
+  try {
+    const value = window.localStorage.getItem(key);
+    if (value === null) {
+      return fallback;
+    }
+    return value === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function persistBoolPref(key: string, value: boolean) {
+  try {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // Ignore persistence failures in embedded webview mode.
   }
 }
 
