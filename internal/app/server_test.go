@@ -39,7 +39,7 @@ func TestCreateAndListHost(t *testing.T) {
 	t.Parallel()
 
 	server := testServer(t)
-	body := `{"name":"demo","address":"127.0.0.1","port":22,"username":"root","platform":"linux","authType":"password"}`
+	body := `{"name":"demo","address":"127.0.0.1","port":22,"username":"root","platform":"linux","authType":"password","group":"prod","favorite":true}`
 
 	postRecorder := httptest.NewRecorder()
 	postRequest := httptest.NewRequest(http.MethodPost, "/api/hosts", strings.NewReader(body))
@@ -63,6 +63,12 @@ func TestCreateAndListHost(t *testing.T) {
 	if len(payload) != 1 {
 		t.Fatalf("expected 1 host, got %d", len(payload))
 	}
+	if payload[0]["group"] != "prod" {
+		t.Fatalf("expected group prod, got %#v", payload[0]["group"])
+	}
+	if payload[0]["favorite"] != true {
+		t.Fatalf("expected favorite true, got %#v", payload[0]["favorite"])
+	}
 }
 
 func TestListHostsDecoratesCredentialState(t *testing.T) {
@@ -79,6 +85,8 @@ func TestListHostsDecoratesCredentialState(t *testing.T) {
 		Username: "root",
 		Platform: models.PlatformLinux,
 		AuthType: models.AuthPassword,
+		Group:    "ops/core",
+		Favorite: true,
 	}); err != nil {
 		t.Fatalf("save host: %v", err)
 	}
@@ -104,6 +112,12 @@ func TestListHostsDecoratesCredentialState(t *testing.T) {
 	}
 	if payload[0].Password != "" {
 		t.Fatal("expected password to be omitted from API response")
+	}
+	if payload[0].Group != "ops/core" {
+		t.Fatalf("expected group ops/core, got %q", payload[0].Group)
+	}
+	if !payload[0].Favorite {
+		t.Fatal("expected favorite to be true")
 	}
 }
 

@@ -303,6 +303,10 @@ export function bootstrap() {
                 </select>
               </label>
             </div>
+            <div class="field-row">
+              <label><span>分组</span><input name="group" placeholder="例如 prod/core 或 windows/db" /></label>
+              <label class="check-row"><input name="favorite" type="checkbox" /><span>加入收藏夹</span></label>
+            </div>
             <label><span>密码</span><input name="password" type="password" placeholder="保存后写入系统凭据库或缓存到当前应用" /></label>
             <label class="check-row"><input name="savePassword" type="checkbox" /><span>保存密码到系统凭据库</span></label>
             <label><span>密钥路径</span><input name="keyPath" placeholder="C:\\Users\\me\\.ssh\\id_rsa" /></label>
@@ -637,6 +641,8 @@ function bindUI(elements: Elements, state: State) {
       authType: String(formData.get("authType") || "password") as AuthType,
       password: String(formData.get("password") || "").trim(),
       savePassword: Boolean(formData.get("savePassword")),
+      group: String(formData.get("group") || "").trim(),
+      favorite: Boolean(formData.get("favorite")),
       keyPath: String(formData.get("keyPath") || "").trim(),
       defaultShell: String(formData.get("defaultShell") || "").trim(),
     };
@@ -687,8 +693,52 @@ function renderHosts(elements: Elements, state: State) {
     return;
   }
 
-  renderHostGroup(elements.hostTree, "Linux", hosts.filter((host) => host.platform === "linux"), state, elements);
-  renderHostGroup(elements.hostTree, "Windows", hosts.filter((host) => host.platform === "windows"), state, elements);
+  const favorites = hosts.filter((host) => host.favorite);
+  const remainder = hosts.filter((host) => !host.favorite);
+  const grouped = new Map<string, Host[]>();
+  const ungrouped: Host[] = [];
+
+  for (const host of remainder) {
+    const key = normalizeGroupName(host.group || "");
+    if (key === "") {
+      ungrouped.push(host);
+      continue;
+    }
+    const existing = grouped.get(key) || [];
+    existing.push(host);
+    grouped.set(key, existing);
+  }
+
+  if (favorites.length > 0) {
+    renderHostGroup(elements.hostTree, "Favorites", sortHosts(favorites), state, elements);
+  }
+
+  const groupNames = Array.from(grouped.keys()).sort((left, right) => left.localeCompare(right, "zh-CN"));
+  for (const groupName of groupNames) {
+    renderGroupedPlatforms(elements.hostTree, groupName, sortHosts(grouped.get(groupName) || []), state, elements);
+  }
+
+  if (ungrouped.length > 0) {
+    renderGroupedPlatforms(elements.hostTree, "Ungrouped", sortHosts(ungrouped), state, elements);
+  }
+}
+
+function renderGroupedPlatforms(root: HTMLDivElement, groupName: string, hosts: Host[], state: State, elements: Elements) {
+  const section = document.createElement("section");
+  section.className = "tree-section";
+  section.innerHTML = `<div class="tree-section-title">${escapeHTML(groupName)}</div>`;
+
+  const linuxHosts = hosts.filter((host) => host.platform === "linux");
+  const windowsHosts = hosts.filter((host) => host.platform === "windows");
+
+  if (linuxHosts.length > 0) {
+    appendHostNodes(section, "Linux", linuxHosts, state, elements);
+  }
+  if (windowsHosts.length > 0) {
+    appendHostNodes(section, "Windows", windowsHosts, state, elements);
+  }
+
+  root.append(section);
 }
 
 function renderOpenSessions(elements: Elements, state: State) {
@@ -741,6 +791,18 @@ function renderHostGroup(root: HTMLDivElement, title: string, hosts: Host[], sta
   section.className = "tree-section";
   section.innerHTML = `<div class="tree-section-title">${title}</div>`;
 
+  appendHostNodes(section, "", hosts, state, elements);
+  root.append(section);
+}
+
+function appendHostNodes(section: HTMLElement, title: string, hosts: Host[], state: State, elements: Elements) {
+  if (title) {
+    const label = document.createElement("div");
+    label.className = "tree-group-head";
+    label.textContent = title;
+    section.append(label);
+  }
+
   for (const host of hosts) {
     const activeSession = findTabByHost(state, host.id);
     const item = document.createElement("article");
@@ -750,11 +812,12 @@ function renderHostGroup(root: HTMLDivElement, title: string, hosts: Host[], sta
         <span class="tree-icon ${host.platform}"></span>
         <div class="tree-copy">
           <strong>${escapeHTML(host.name)}</strong>
-          <small>${escapeHTML(host.username)}@${escapeHTML(host.address)}:${host.port}</small>
+          <small>${escapeHTML(host.username)}@${escapeHTML(host.address)}:${host.port}${host.group ? ` · ${escapeHTML(host.group)}` : ""}</small>
         </div>
       </button>
       <div class="tree-actions">
         <span class="tree-state ${activeSession?.status || "idle"}"></span>
+        ${host.favorite ? `<span class="mini-meta warn">★</span>` : ""}
         ${host.hasPassword ? `<span class="mini-meta">钥</span>` : ""}
         <button class="mini-button connect-button" type="button">连接</button>
       </div>
@@ -774,8 +837,6 @@ function renderHostGroup(root: HTMLDivElement, title: string, hosts: Host[], sta
     });
     section.append(item);
   }
-
-  root.append(section);
 }
 
 function filteredHosts(state: State) {
@@ -786,6 +847,23 @@ function filteredHosts(state: State) {
     const haystack = `${host.name} ${host.address} ${host.username}`.toLowerCase();
     return haystack.includes(state.search);
   });
+}
+
+function sortHosts(hosts: Host[]) {
+  return [...hosts].sort((left, right) => {
+    if (!!left.favorite !== !!right.favorite) {
+      return left.favorite ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name, "zh-CN");
+  });
+}
+
+function normalizeGroupName(value: string) {
+  return value
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
 }
 
 function openNewEditor(elements: Elements, state: State) {
@@ -799,6 +877,8 @@ function openNewEditor(elements: Elements, state: State) {
   setInput(elements.hostForm, "username", "");
   setInput(elements.hostForm, "platform", "linux");
   setInput(elements.hostForm, "authType", "password");
+  setInput(elements.hostForm, "group", "");
+  setCheckbox(elements.hostForm, "favorite", false);
   setInput(elements.hostForm, "password", "");
   setCheckbox(elements.hostForm, "savePassword", false);
   setInput(elements.hostForm, "keyPath", "");
@@ -818,6 +898,8 @@ function fillForm(elements: Elements, state: State, host: Host) {
   setInput(elements.hostForm, "username", host.username);
   setInput(elements.hostForm, "platform", host.platform);
   setInput(elements.hostForm, "authType", host.authType);
+  setInput(elements.hostForm, "group", host.group || "");
+  setCheckbox(elements.hostForm, "favorite", !!host.favorite);
   setInput(elements.hostForm, "password", "");
   setCheckbox(elements.hostForm, "savePassword", !!host.hasPassword);
   setInput(elements.hostForm, "keyPath", host.keyPath || "");

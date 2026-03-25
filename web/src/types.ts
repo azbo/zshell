@@ -12,6 +12,8 @@ export type Host = {
   password?: string;
   hasPassword?: boolean;
   savePassword?: boolean;
+  group?: string;
+  favorite?: boolean;
   keyPath?: string;
   defaultShell?: string;
 };
