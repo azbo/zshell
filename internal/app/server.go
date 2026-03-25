@@ -5,7 +5,9 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -24,9 +26,16 @@ var embeddedFiles embed.FS
 
 type Server struct {
 	store      *storage.HostStore
+	files      fileService
 	mux        *http.ServeMux
 	httpServer *http.Server
 	baseURL    string
+}
+
+type fileService interface {
+	List(hostID, password, remotePath string) (models.RemoteListing, error)
+	Upload(hostID, password, remotePath, fileName string, reader io.Reader) (models.RemoteEntry, error)
+	Download(hostID, password, remotePath string) (io.ReadCloser, string, error)
 }
 
 func NewServer() (*Server, error) {
@@ -35,12 +44,17 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 
-	return newServerWithStore(store), nil
+	return newServerWithDependencies(store, session.NewFileService(store)), nil
 }
 
 func newServerWithStore(store *storage.HostStore) *Server {
+	return newServerWithDependencies(store, session.NewFileService(store))
+}
+
+func newServerWithDependencies(store *storage.HostStore, files fileService) *Server {
 	server := &Server{
 		store: store,
+		files: files,
 		mux:   http.NewServeMux(),
 	}
 	server.routes()
@@ -120,6 +134,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
 	s.mux.HandleFunc("/api/hosts/", s.handleHostByID)
+	s.mux.HandleFunc("/api/files/", s.handleFiles)
 	s.mux.Handle("/ws/sessions", session.NewSSHHandler(s.store))
 
 	distFS, err := fs.Sub(embeddedFiles, "frontend/dist")
@@ -127,6 +142,107 @@ func (s *Server) routes() {
 		panic(err)
 	}
 	s.mux.Handle("/", http.FileServer(http.FS(distFS)))
+}
+
+type fileRequest struct {
+	Path     string `json:"path"`
+	Password string `json:"password"`
+}
+
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/files/")
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	hostID := parts[0]
+	action := parts[1]
+
+	switch action {
+	case "list":
+		s.handleFileList(w, r, hostID)
+	case "upload":
+		s.handleFileUpload(w, r, hostID)
+	case "download":
+		s.handleFileDownload(w, r, hostID)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request, hostID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request fileRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	listing, err := s.files.List(hostID, request.Password, request.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listing)
+}
+
+func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, hostID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	password := r.FormValue("password")
+	remotePath := r.FormValue("path")
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	defer file.Close()
+
+	entry, err := s.files.Upload(hostID, password, remotePath, header.Filename, file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request, hostID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request fileRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	stream, fileName, err := s.files.Download(hostID, request.Password, request.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	defer stream.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
+	if _, err := io.Copy(w, stream); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {

@@ -2,12 +2,14 @@ package app
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"zshell/internal/models"
 	"zshell/internal/storage"
 )
 
@@ -62,6 +64,44 @@ func TestCreateAndListHost(t *testing.T) {
 	}
 }
 
+func TestListFilesRoute(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewHostStore(filepath.Join(t.TempDir(), "hosts.json"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	saved, err := store.Save(models.Host{
+		Name:     "demo",
+		Address:  "127.0.0.1",
+		Port:     22,
+		Username: "root",
+		Platform: models.PlatformLinux,
+		AuthType: models.AuthPassword,
+	})
+	if err != nil {
+		t.Fatalf("save host: %v", err)
+	}
+
+	server := newServerWithDependencies(store, fakeFileService{})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/files/"+saved.ID+"/list", strings.NewReader(`{"path":".","password":"secret"}`))
+	request.Header.Set("Content-Type", "application/json")
+
+	server.mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["path"] != "." {
+		t.Fatalf("expected path '.', got %#v", payload["path"])
+	}
+}
+
 func testServer(t *testing.T) *Server {
 	t.Helper()
 
@@ -70,4 +110,23 @@ func testServer(t *testing.T) *Server {
 		t.Fatalf("new store: %v", err)
 	}
 	return newServerWithStore(store)
+}
+
+type fakeFileService struct{}
+
+func (fakeFileService) List(hostID, password, remotePath string) (models.RemoteListing, error) {
+	return models.RemoteListing{
+		Path: remotePath,
+		Entries: []models.RemoteEntry{
+			{Name: "demo.txt", Path: remotePath + "/demo.txt"},
+		},
+	}, nil
+}
+
+func (fakeFileService) Upload(hostID, password, remotePath, fileName string, reader io.Reader) (models.RemoteEntry, error) {
+	return models.RemoteEntry{Name: fileName, Path: remotePath + "/" + fileName}, nil
+}
+
+func (fakeFileService) Download(hostID, password, remotePath string) (io.ReadCloser, string, error) {
+	return io.NopCloser(strings.NewReader("demo")), "demo.txt", nil
 }

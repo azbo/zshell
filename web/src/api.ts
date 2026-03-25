@@ -1,4 +1,4 @@
-import type { Host } from "./types";
+import type { Host, RemoteEntry, RemoteListing } from "./types";
 
 export async function loadHosts(): Promise<Host[]> {
   const response = await fetch("/api/hosts");
@@ -24,4 +24,47 @@ export async function deleteHost(id: string): Promise<void> {
     const payload = (await response.json()) as { error?: string };
     throw new Error(payload.error || "删除失败");
   }
+}
+
+export async function listFiles(hostID: string, path: string, password: string): Promise<RemoteListing> {
+  const response = await fetch(`/api/files/${hostID}/list`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, password }),
+  });
+  if (!response.ok) {
+    const payload = (await response.json()) as { error?: string };
+    throw new Error(payload.error || "读取目录失败");
+  }
+  return (await response.json()) as RemoteListing;
+}
+
+export async function uploadFile(hostID: string, path: string, password: string, file: File): Promise<RemoteEntry> {
+  const form = new FormData();
+  form.set("path", path);
+  form.set("password", password);
+  form.set("file", file);
+
+  const response = await fetch(`/api/files/${hostID}/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    const payload = (await response.json()) as { error?: string };
+    throw new Error(payload.error || "上传失败");
+  }
+  return (await response.json()) as RemoteEntry;
+}
+
+export async function downloadFile(hostID: string, path: string, password: string): Promise<Blob> {
+  const response = await fetch(`/api/files/${hostID}/download`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, password }),
+  });
+  if (!response.ok) {
+    const payload = (await response.json()) as { error?: string };
+    throw new Error(payload.error || "下载失败");
+  }
+  return await response.blob();
 }

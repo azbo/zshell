@@ -22,3 +22,17 @@ export type SocketMessage = {
   rows?: number;
   message?: string;
 };
+
+export type RemoteEntry = {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  mode: string;
+  modTime: string;
+};
+
+export type RemoteListing = {
+  path: string;
+  entries: RemoteEntry[];
+};
