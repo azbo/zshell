@@ -124,28 +124,30 @@ export function bootstrap() {
   app.innerHTML = `
     <div class="workbench">
       <header class="chrome-bar">
-        <div class="chrome-title">zshell</div>
-        <nav class="chrome-menu">
-          <span>会话</span>
-          <span>编辑</span>
-          <span>传输</span>
-          <span>工具</span>
-          <span>窗口</span>
-          <span>帮助</span>
-        </nav>
+        <div class="chrome-left">
+          <div class="chrome-title">zshell</div>
+          <nav class="chrome-menu">
+            <span>会话</span>
+            <span>编辑</span>
+            <span>传输</span>
+            <span>工具</span>
+            <span>窗口</span>
+            <span>帮助</span>
+          </nav>
+        </div>
+        <div class="chrome-right">
+          <div class="chrome-actions">
+            <button id="new-host" class="toolbar-button accent">新建会话</button>
+            <button id="connect-selected" class="toolbar-button">连接</button>
+            <button id="edit-selected" class="toolbar-button">编辑</button>
+            <button id="layout-session" class="toolbar-button subtle">侧栏</button>
+            <button id="layout-files" class="toolbar-button subtle">文件区</button>
+            <button id="layout-status" class="toolbar-button subtle">状态栏</button>
+            <button id="focus-mode" class="toolbar-button subtle">专注模式</button>
+          </div>
+          <div id="status-banner" class="status-banner">等待连接</div>
+        </div>
       </header>
-      <div class="chrome-toolbar">
-        <button id="new-host" class="toolbar-button accent">新建会话</button>
-        <button id="connect-selected" class="toolbar-button">连接所选</button>
-        <button id="edit-selected" class="toolbar-button">编辑</button>
-        <div class="toolbar-separator"></div>
-        <button id="layout-session" class="toolbar-button subtle">侧栏</button>
-        <button id="layout-files" class="toolbar-button subtle">文件区</button>
-        <button id="layout-status" class="toolbar-button subtle">状态栏</button>
-        <button id="focus-mode" class="toolbar-button subtle">专注模式</button>
-        <div class="toolbar-separator"></div>
-        <div id="status-banner" class="status-banner">等待连接</div>
-      </div>
       <div class="layout">
         <aside class="session-pane">
           <div class="pane-head">

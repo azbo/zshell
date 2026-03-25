@@ -63,7 +63,7 @@ button {
 
 .workbench {
   display: grid;
-  grid-template-rows: 34px 42px 1fr 28px;
+  grid-template-rows: auto 1fr 28px;
   min-height: 100vh;
   background: #171717;
 }
@@ -86,7 +86,7 @@ button {
 }
 
 .workbench.hide-status-strip {
-  grid-template-rows: 34px 42px 1fr;
+  grid-template-rows: auto 1fr;
 }
 
 .workbench.hide-status-strip .status-strip {
@@ -98,7 +98,6 @@ button {
 }
 
 .workbench.focus-mode .chrome-bar,
-.workbench.focus-mode .chrome-toolbar,
 .workbench.focus-mode .status-strip,
 .workbench.focus-mode .session-pane,
 .workbench.focus-mode .file-splitter,
@@ -113,7 +112,6 @@ button {
 }
 
 .chrome-bar,
-.chrome-toolbar,
 .status-strip {
   display: flex;
   align-items: center;
@@ -122,22 +120,48 @@ button {
   background: #1b1b1b;
 }
 
+.chrome-bar {
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 14px;
+}
+
+.chrome-left,
+.chrome-right,
+.chrome-actions {
+  display: flex;
+  align-items: center;
+}
+
+.chrome-left,
+.chrome-right {
+  gap: 12px;
+  min-width: 0;
+}
+
+.chrome-right {
+  justify-content: flex-end;
+  flex: 1;
+}
+
+.chrome-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .chrome-title {
-  width: 96px;
+  flex: 0 0 auto;
   color: #f5f5f5;
   font-size: 13px;
 }
 
 .chrome-menu {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   color: var(--muted);
   font-size: 12px;
-}
-
-.chrome-toolbar {
-  gap: 10px;
-  background: #202020;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .workspace-tools,
@@ -168,12 +192,13 @@ button {
 }
 
 .toolbar-button {
-  height: 28px;
-  padding: 0 12px;
+  height: 26px;
+  padding: 0 10px;
   border: 1px solid var(--line-soft);
   border-radius: 6px;
   background: #2a2a2a;
   color: var(--text);
+  font-size: 12px;
 }
 
 .toolbar-button.subtle {

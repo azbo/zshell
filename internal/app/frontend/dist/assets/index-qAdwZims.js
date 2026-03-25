@@ -38,28 +38,30 @@ WARNING: This link could potentially be dangerous`)){let i=window.open();if(i){t
 `,t)}paste(e){this._core.paste(e)}refresh(e,t){this._verifyIntegers(e,t),this._core.refresh(e,t)}reset(){this._core.reset()}clearTextureAtlas(){this._core.clearTextureAtlas()}loadAddon(e){this._addonManager.loadAddon(this,e)}static get strings(){return{get promptLabel(){return Oi.get()},set promptLabel(e){Oi.set(e)},get tooMuchOutput(){return Hi.get()},set tooMuchOutput(e){Hi.set(e)}}}_verifyIntegers(...e){for(Re of e)if(Re===1/0||isNaN(Re)||Re%1!==0)throw new Error("This API only accepts integers")}_verifyPositiveIntegers(...e){for(Re of e)if(Re&&(Re===1/0||isNaN(Re)||Re%1!==0||Re<0))throw new Error("This API only accepts positive integers")}};async function Vl(){return await(await fetch("/api/hosts")).json()}async function Yl(e,t=""){const i=await fetch(t?`/api/hosts/${t}`:"/api/hosts",{method:t?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(e)});if(!i.ok){const s=await i.json();throw new Error(s.error||"保存失败")}return await i.json()}async function jl(e){const t=await fetch(`/api/hosts/${e}`,{method:"DELETE"});if(!t.ok){const i=await t.json();throw new Error(i.error||"删除失败")}}async function Xl(e,t,i){const s=await fetch(`/api/files/${e}/list`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:t,password:i})});if(!s.ok){const r=await s.json();throw new Error(r.error||"读取目录失败")}return await s.json()}async function Gl(e){const t=await fetch("/api/local/list",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:e})});if(!t.ok){const i=await t.json();throw new Error(i.error||"读取本地目录失败")}return await t.json()}async function Jl(e,t,i,s){const r=new FormData;r.set("path",t),r.set("password",i),r.set("file",s);const o=await fetch(`/api/files/${e}/upload`,{method:"POST",body:r});if(!o.ok){const n=await o.json();throw new Error(n.error||"上传失败")}return await o.json()}async function Zl(e,t,i){const s=await fetch(`/api/files/${e}/download`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:t,password:i})});if(!s.ok){const r=await s.json();throw new Error(r.error||"下载失败")}return await s.blob()}async function Ql(e,t,i,s){const r=await fetch(`/api/files/${e}/upload-path`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:t,password:i,localPath:s})});if(!r.ok){const o=await r.json();throw new Error(o.error||"上传失败")}return await r.json()}async function eh(e,t,i,s){const r=await fetch(`/api/files/${e}/download-to-local`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:t,password:i,localPath:s})});if(!r.ok){const o=await r.json();throw new Error(o.error||"下载失败")}return await r.json()}function th(){const e=document.querySelector("#app");if(!e)throw new Error("app root not found");e.innerHTML=`
     <div class="workbench">
       <header class="chrome-bar">
-        <div class="chrome-title">zshell</div>
-        <nav class="chrome-menu">
-          <span>会话</span>
-          <span>编辑</span>
-          <span>传输</span>
-          <span>工具</span>
-          <span>窗口</span>
-          <span>帮助</span>
-        </nav>
+        <div class="chrome-left">
+          <div class="chrome-title">zshell</div>
+          <nav class="chrome-menu">
+            <span>会话</span>
+            <span>编辑</span>
+            <span>传输</span>
+            <span>工具</span>
+            <span>窗口</span>
+            <span>帮助</span>
+          </nav>
+        </div>
+        <div class="chrome-right">
+          <div class="chrome-actions">
+            <button id="new-host" class="toolbar-button accent">新建会话</button>
+            <button id="connect-selected" class="toolbar-button">连接</button>
+            <button id="edit-selected" class="toolbar-button">编辑</button>
+            <button id="layout-session" class="toolbar-button subtle">侧栏</button>
+            <button id="layout-files" class="toolbar-button subtle">文件区</button>
+            <button id="layout-status" class="toolbar-button subtle">状态栏</button>
+            <button id="focus-mode" class="toolbar-button subtle">专注模式</button>
+          </div>
+          <div id="status-banner" class="status-banner">等待连接</div>
+        </div>
       </header>
-      <div class="chrome-toolbar">
-        <button id="new-host" class="toolbar-button accent">新建会话</button>
-        <button id="connect-selected" class="toolbar-button">连接所选</button>
-        <button id="edit-selected" class="toolbar-button">编辑</button>
-        <div class="toolbar-separator"></div>
-        <button id="layout-session" class="toolbar-button subtle">侧栏</button>
-        <button id="layout-files" class="toolbar-button subtle">文件区</button>
-        <button id="layout-status" class="toolbar-button subtle">状态栏</button>
-        <button id="focus-mode" class="toolbar-button subtle">专注模式</button>
-        <div class="toolbar-separator"></div>
-        <div id="status-banner" class="status-banner">等待连接</div>
-      </div>
       <div class="layout">
         <aside class="session-pane">
           <div class="pane-head">
