@@ -30,15 +30,24 @@ type TerminalTab = {
   socket: WebSocket;
   node: HTMLDivElement;
   status: string;
+  syncGroup: SyncGroup;
 };
+
+type SyncGroup = "off" | "a" | "b";
 
 type Elements = {
   hostTree: HTMLDivElement;
+  openSessions: HTMLDivElement;
   hostCount: HTMLSpanElement;
   hostSearch: HTMLInputElement;
+  tabSearch: HTMLInputElement;
   newHostButton: HTMLButtonElement;
   connectSelectedButton: HTMLButtonElement;
   editSelectedButton: HTMLButtonElement;
+  syncToggleButton: HTMLButtonElement;
+  syncOffButton: HTMLButtonElement;
+  syncAButton: HTMLButtonElement;
+  syncBButton: HTMLButtonElement;
   editorPanel: HTMLAsideElement;
   closeEditorButton: HTMLButtonElement;
   hostForm: HTMLFormElement;
@@ -77,6 +86,7 @@ type State = {
   editingId: string;
   activeTabId: string;
   search: string;
+  tabSearch: string;
   editorOpen: boolean;
   terminals: Map<string, TerminalTab>;
   passwordCache: Map<string, string>;
@@ -93,6 +103,7 @@ type State = {
   draggingFilePane: boolean;
   passwordClearArmed: boolean;
   transferStatus: string;
+  syncBroadcastEnabled: boolean;
 };
 
 export function bootstrap() {
@@ -136,6 +147,10 @@ export function bootstrap() {
           </label>
           <div class="tree-groups">
             <section class="tree-group">
+              <div class="tree-group-head">Open sessions</div>
+              <div id="open-sessions" class="host-tree"></div>
+            </section>
+            <section class="tree-group">
               <div class="tree-group-head">Shell sessions</div>
               <div id="host-tree" class="host-tree"></div>
             </section>
@@ -148,7 +163,17 @@ export function bootstrap() {
               <p class="eyebrow">Workspace</p>
               <h2 id="workspace-title">远程终端工作台</h2>
             </div>
-            <div class="workspace-meta">SSH / Windows / Linux</div>
+            <div class="workspace-tools">
+              <label class="tab-search-box">
+                <input id="tab-search" placeholder="搜索已打开标签  Ctrl+K" />
+              </label>
+              <div class="sync-strip">
+                <button id="sync-toggle" class="mini-button ghost" type="button">群发关</button>
+                <button id="sync-off" class="mini-button" type="button">独立</button>
+                <button id="sync-a" class="mini-button" type="button">A 通道</button>
+                <button id="sync-b" class="mini-button" type="button">B 通道</button>
+              </div>
+            </div>
           </div>
           <div id="tab-bar" class="tab-bar"></div>
           <section id="terminal-stage" class="terminal-stage">
@@ -290,6 +315,7 @@ export function bootstrap() {
     editingId: "",
     activeTabId: "",
     search: "",
+    tabSearch: "",
     editorOpen: false,
     terminals: new Map(),
     passwordCache: new Map(),
@@ -306,6 +332,7 @@ export function bootstrap() {
     draggingFilePane: false,
     passwordClearArmed: false,
     transferStatus: "",
+    syncBroadcastEnabled: false,
   };
 
   bindUI(elements, state);
@@ -321,11 +348,17 @@ export function bootstrap() {
 function queryElements(): Elements {
   return {
     hostTree: document.querySelector<HTMLDivElement>("#host-tree")!,
+    openSessions: document.querySelector<HTMLDivElement>("#open-sessions")!,
     hostCount: document.querySelector<HTMLSpanElement>("#host-count")!,
     hostSearch: document.querySelector<HTMLInputElement>("#host-search")!,
+    tabSearch: document.querySelector<HTMLInputElement>("#tab-search")!,
     newHostButton: document.querySelector<HTMLButtonElement>("#new-host")!,
     connectSelectedButton: document.querySelector<HTMLButtonElement>("#connect-selected")!,
     editSelectedButton: document.querySelector<HTMLButtonElement>("#edit-selected")!,
+    syncToggleButton: document.querySelector<HTMLButtonElement>("#sync-toggle")!,
+    syncOffButton: document.querySelector<HTMLButtonElement>("#sync-off")!,
+    syncAButton: document.querySelector<HTMLButtonElement>("#sync-a")!,
+    syncBButton: document.querySelector<HTMLButtonElement>("#sync-b")!,
     editorPanel: document.querySelector<HTMLAsideElement>("#editor-panel")!,
     closeEditorButton: document.querySelector<HTMLButtonElement>("#close-editor")!,
     hostForm: document.querySelector<HTMLFormElement>("#host-form")!,
@@ -380,6 +413,38 @@ function bindUI(elements: Elements, state: State) {
   elements.hostSearch.addEventListener("input", () => {
     state.search = elements.hostSearch.value.trim().toLowerCase();
     renderHosts(elements, state);
+  });
+  elements.tabSearch.addEventListener("input", () => {
+    state.tabSearch = elements.tabSearch.value.trim().toLowerCase();
+    renderOpenSessions(elements, state);
+  });
+  elements.tabSearch.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      const match = matchingOpenTabs(state)[0];
+      if (match) {
+        activateTab(elements, state, match.id);
+      }
+    }
+    if (event.key === "Escape") {
+      state.tabSearch = "";
+      elements.tabSearch.value = "";
+      renderOpenSessions(elements, state);
+    }
+  });
+  elements.syncToggleButton.addEventListener("click", () => {
+    state.syncBroadcastEnabled = !state.syncBroadcastEnabled;
+    updateSyncControls(elements, state);
+    syncActiveWorkspace(elements, state);
+  });
+  elements.syncOffButton.addEventListener("click", () => setActiveTabSyncGroup(elements, state, "off"));
+  elements.syncAButton.addEventListener("click", () => setActiveTabSyncGroup(elements, state, "a"));
+  elements.syncBButton.addEventListener("click", () => setActiveTabSyncGroup(elements, state, "b"));
+  window.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      elements.tabSearch.focus();
+      elements.tabSearch.select();
+    }
   });
 
   elements.fileSplitter.addEventListener("mousedown", (event) => {
@@ -552,9 +617,11 @@ async function refreshHosts(elements: Elements, state: State) {
     state.selectedHostId = state.hosts[0]?.id || "";
   }
   renderHosts(elements, state);
+  renderOpenSessions(elements, state);
   renderTabs(elements, state);
   renderFilePanel(elements, state);
   renderEditor(elements, state);
+  updateSyncControls(elements, state);
 }
 
 function renderHosts(elements: Elements, state: State) {
@@ -569,6 +636,47 @@ function renderHosts(elements: Elements, state: State) {
 
   renderHostGroup(elements.hostTree, "Linux", hosts.filter((host) => host.platform === "linux"), state, elements);
   renderHostGroup(elements.hostTree, "Windows", hosts.filter((host) => host.platform === "windows"), state, elements);
+}
+
+function renderOpenSessions(elements: Elements, state: State) {
+  const sessions = matchingOpenTabs(state);
+  elements.openSessions.innerHTML = "";
+
+  if (state.terminals.size === 0) {
+    elements.openSessions.innerHTML = `<div class="empty-hosts">没有已打开会话</div>`;
+    return;
+  }
+
+  if (sessions.length === 0) {
+    elements.openSessions.innerHTML = `<div class="empty-hosts">没有匹配的标签</div>`;
+    return;
+  }
+
+  for (const tab of sessions) {
+    const item = document.createElement("article");
+    item.className = `tree-item ${state.activeTabId === tab.id ? "selected" : ""}`;
+    item.innerHTML = `
+      <button class="tree-main" type="button">
+        <span class="tree-icon ${tab.host.platform}"></span>
+        <div class="tree-copy">
+          <strong>${escapeHTML(tab.host.name)}</strong>
+          <small>${escapeHTML(syncGroupText(tab.syncGroup))} · ${escapeHTML(tab.status)}</small>
+        </div>
+      </button>
+      <div class="tree-actions">
+        <span class="tree-state ${tab.status}"></span>
+        <span class="mini-meta ${tab.syncGroup === "off" ? "neutral" : "accent"}">${escapeHTML(syncGroupBadge(tab.syncGroup))}</span>
+        <button class="mini-button close-session-button" type="button">关</button>
+      </div>
+    `;
+    item.querySelector<HTMLButtonElement>(".tree-main")!.addEventListener("click", () => {
+      activateTab(elements, state, tab.id);
+    });
+    item.querySelector<HTMLButtonElement>(".close-session-button")!.addEventListener("click", () => {
+      closeTab(elements, state, tab.id);
+    });
+    elements.openSessions.append(item);
+  }
 }
 
 function renderHostGroup(root: HTMLDivElement, title: string, hosts: Host[], state: State, elements: Elements) {
@@ -799,10 +907,13 @@ async function connectHost(elements: Elements, state: State, host: Host) {
     socket,
     node,
     status: "connecting",
+    syncGroup: "off",
   };
   state.terminals.set(tabId, tab);
   state.activeTabId = tabId;
   state.selectedHostId = host.id;
+  updateSyncControls(elements, state);
+  renderOpenSessions(elements, state);
   renderTabs(elements, state);
   activateTab(elements, state, tabId);
 
@@ -825,6 +936,7 @@ async function connectHost(elements: Elements, state: State, host: Host) {
     tab.term.writeln("\r\n\x1b[31m[session closed]\x1b[0m");
     tab.status = "closed";
     renderTabs(elements, state);
+    renderOpenSessions(elements, state);
     renderHosts(elements, state);
     renderFilePanel(elements, state);
   });
@@ -832,10 +944,11 @@ async function connectHost(elements: Elements, state: State, host: Host) {
     tab.term.writeln("\r\n\x1b[31m[connection error]\x1b[0m");
     tab.status = "error";
     renderTabs(elements, state);
+    renderOpenSessions(elements, state);
     renderHosts(elements, state);
     renderFilePanel(elements, state);
   });
-  term.onData((data) => sendMessage(socket, { type: "input", data }));
+  term.onData((data) => routeTerminalInput(elements, state, tabId, data));
 }
 
 async function handleSocketMessage(elements: Elements, state: State, tabID: string, message: SocketMessage) {
@@ -867,6 +980,7 @@ async function handleSocketMessage(elements: Elements, state: State, tabID: stri
   }
 
   syncWorkspace(elements, state, tab);
+  renderOpenSessions(elements, state);
 }
 
 function renderTabs(elements: Elements, state: State) {
@@ -877,6 +991,7 @@ function renderTabs(elements: Elements, state: State) {
     button.innerHTML = `
       <span class="tab-mark ${tab.status}"></span>
       <span>${escapeHTML(tab.host.name)}</span>
+      <em class="tab-sync ${tab.syncGroup === "off" ? "off" : tab.syncGroup}">${escapeHTML(syncGroupBadge(tab.syncGroup))}</em>
       <small>${escapeHTML(tab.status)}</small>
       <strong class="tab-close">×</strong>
     `;
@@ -895,6 +1010,7 @@ function renderTabs(elements: Elements, state: State) {
   if (footerTabs) {
     footerTabs.textContent = String(state.terminals.size);
   }
+  updateSyncControls(elements, state);
 }
 
 function activateTab(elements: Elements, state: State, id: string) {
@@ -912,7 +1028,9 @@ function activateTab(elements: Elements, state: State, id: string) {
     elements.workspaceTitle.textContent = "远程终端工作台";
     elements.footerStatus.textContent = "就绪";
   }
+  updateSyncControls(elements, state);
   renderTabs(elements, state);
+  renderOpenSessions(elements, state);
   renderHosts(elements, state);
   renderFilePanel(elements, state);
 }
@@ -945,7 +1063,9 @@ function closeTab(elements: Elements, state: State, id: string) {
   elements.statusBanner.textContent = "等待连接";
   elements.workspaceTitle.textContent = "远程终端工作台";
   elements.footerStatus.textContent = "就绪";
+  updateSyncControls(elements, state);
   renderTabs(elements, state);
+  renderOpenSessions(elements, state);
   renderHosts(elements, state);
   renderFilePanel(elements, state);
 }
@@ -1106,8 +1226,104 @@ function bindFileRows(
   }
 }
 
+function routeTerminalInput(elements: Elements, state: State, sourceTabID: string, data: string) {
+  const source = state.terminals.get(sourceTabID);
+  if (!source) {
+    return;
+  }
+
+  sendMessage(source.socket, { type: "input", data });
+  if (!state.syncBroadcastEnabled || source.syncGroup === "off") {
+    return;
+  }
+
+  let broadcastCount = 1;
+  for (const tab of state.terminals.values()) {
+    if (tab.id === source.id || tab.syncGroup !== source.syncGroup || tab.status !== "connected") {
+      continue;
+    }
+    sendMessage(tab.socket, { type: "input", data });
+    broadcastCount += 1;
+  }
+
+  elements.footerStatus.textContent = `Sync ${syncGroupText(source.syncGroup)} / ${broadcastCount} tabs`;
+}
+
+function setActiveTabSyncGroup(elements: Elements, state: State, group: SyncGroup) {
+  const active = state.terminals.get(state.activeTabId);
+  if (!active) {
+    return;
+  }
+  active.syncGroup = group;
+  updateSyncControls(elements, state);
+  renderTabs(elements, state);
+  renderOpenSessions(elements, state);
+  syncActiveWorkspace(elements, state);
+}
+
+function updateSyncControls(elements: Elements, state: State) {
+  const active = state.terminals.get(state.activeTabId);
+  const disabled = !active;
+  const activeGroup = active?.syncGroup || "off";
+
+  elements.syncToggleButton.disabled = disabled;
+  elements.syncOffButton.disabled = disabled;
+  elements.syncAButton.disabled = disabled;
+  elements.syncBButton.disabled = disabled;
+
+  elements.syncToggleButton.textContent = state.syncBroadcastEnabled ? "群发开" : "群发关";
+  elements.syncToggleButton.classList.toggle("active", state.syncBroadcastEnabled);
+  elements.syncOffButton.classList.toggle("active", activeGroup === "off");
+  elements.syncAButton.classList.toggle("active", activeGroup === "a");
+  elements.syncBButton.classList.toggle("active", activeGroup === "b");
+}
+
+function matchingOpenTabs(state: State) {
+  const tabs = Array.from(state.terminals.values());
+  if (!state.tabSearch) {
+    return tabs;
+  }
+  return tabs.filter((tab) => {
+    const haystack = `${tab.host.name} ${tab.host.address} ${tab.host.username} ${tab.status}`.toLowerCase();
+    return haystack.includes(state.tabSearch);
+  });
+}
+
+function syncActiveWorkspace(elements: Elements, state: State) {
+  const active = state.terminals.get(state.activeTabId);
+  if (!active) {
+    elements.statusBanner.textContent = "等待连接";
+    return;
+  }
+  syncWorkspace(elements, state, active);
+}
+
+function syncGroupText(group: SyncGroup) {
+  switch (group) {
+    case "a":
+      return "Sync A";
+    case "b":
+      return "Sync B";
+    default:
+      return "独立";
+  }
+}
+
+function syncGroupBadge(group: SyncGroup) {
+  switch (group) {
+    case "a":
+      return "A";
+    case "b":
+      return "B";
+    default:
+      return "-";
+  }
+}
+
 function syncWorkspace(elements: Elements, state: State, tab: TerminalTab) {
-  elements.statusBanner.textContent = `${tab.host.name}: ${tab.status}`;
+  const syncSuffix =
+    tab.syncGroup === "off" ? "独立输入" : `${syncGroupText(tab.syncGroup)} / ${state.syncBroadcastEnabled ? "群发开" : "群发关"}`;
+  elements.statusBanner.textContent = `${tab.host.name}: ${tab.status} · ${syncSuffix}`;
   elements.workspaceTitle.textContent = `${tab.host.name} · ${tab.host.username}@${tab.host.address}`;
   elements.footerStatus.textContent = `${tab.host.platform} / ${tab.status}`;
   renderHosts(elements, state);
