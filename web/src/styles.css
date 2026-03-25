@@ -139,9 +139,13 @@ button {
 .file-toolbar {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .file-path-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0 14px 10px;
 }
 
@@ -226,6 +230,7 @@ button {
 .pane-head h2,
 .workspace-head h2,
 .file-pane-head h3,
+.file-column-head h4,
 .empty-state h3 {
   margin: 0;
   font-weight: 600;
@@ -367,12 +372,36 @@ button {
   font-size: 12px;
 }
 
+.mini-button.ghost {
+  background: #202020;
+}
+
 .mini-meta {
   padding: 2px 6px;
   border-radius: 999px;
   background: rgba(78, 161, 255, 0.14);
   color: #b9d9ff;
   font-size: 11px;
+}
+
+.mini-meta.neutral {
+  background: rgba(255, 255, 255, 0.08);
+  color: #d5d5d5;
+}
+
+.mini-meta.accent {
+  background: rgba(78, 161, 255, 0.18);
+  color: #cfe6ff;
+}
+
+.mini-meta.warn {
+  background: rgba(255, 179, 71, 0.14);
+  color: #ffd69a;
+}
+
+.mini-meta.danger {
+  background: rgba(255, 107, 107, 0.14);
+  color: #ffd2d2;
 }
 
 .workspace-head {
@@ -465,6 +494,51 @@ button {
   min-height: 0;
 }
 
+.file-transfer-bar {
+  padding: 0 14px 12px;
+}
+
+.transfer-status,
+.column-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #343434;
+  background: #222;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  padding: 0 10px 10px;
+}
+
+.file-column {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  min-height: 0;
+  border: 1px solid #2b2b2b;
+  background: #171717;
+}
+
+.file-column-head,
+.credential-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.file-column-head {
+  padding: 12px 14px 10px;
+}
+
 .file-grid-head,
 .file-row {
   display: grid;
@@ -522,7 +596,7 @@ button {
   padding: 0 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   color: var(--muted);
 }
 
@@ -615,6 +689,10 @@ button {
 
   .terminal-pane {
     grid-template-rows: auto auto minmax(260px, 1fr) 6px minmax(200px, var(--file-pane-height));
+  }
+
+  .file-columns {
+    grid-template-columns: 1fr;
   }
 
   .file-grid-head,

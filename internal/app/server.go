@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -142,6 +142,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
 	s.mux.HandleFunc("/api/hosts/", s.handleHostByID)
 	s.mux.HandleFunc("/api/files/", s.handleFiles)
+	s.mux.HandleFunc("/api/local/list", s.handleLocalList)
 	s.mux.Handle("/ws/sessions", session.NewSSHHandler(s.store, s.creds))
 
 	distFS, err := fs.Sub(embeddedFiles, "frontend/dist")
@@ -152,8 +153,9 @@ func (s *Server) routes() {
 }
 
 type fileRequest struct {
-	Path     string `json:"path"`
-	Password string `json:"password"`
+	Path      string `json:"path"`
+	Password  string `json:"password"`
+	LocalPath string `json:"localPath,omitempty"`
 }
 
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +176,10 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		s.handleFileUpload(w, r, hostID)
 	case "download":
 		s.handleFileDownload(w, r, hostID)
+	case "upload-path":
+		s.handleFileUploadPath(w, r, hostID)
+	case "download-to-local":
+		s.handleFileDownloadToLocal(w, r, hostID)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -250,6 +256,78 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request, host
 	if _, err := io.Copy(w, stream); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 	}
+}
+
+func (s *Server) handleFileUploadPath(w http.ResponseWriter, r *http.Request, hostID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request fileRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	entry, err := uploadLocalPathToRemote(s.files, hostID, request.Password, request.Path, request.LocalPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+func (s *Server) handleFileDownloadToLocal(w http.ResponseWriter, r *http.Request, hostID string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request fileRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	stream, fileName, err := s.files.Download(hostID, request.Password, request.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	defer stream.Close()
+
+	targetPath, err := saveRemoteFileToLocalPath(request.LocalPath, fileName, stream)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"path": targetPath})
+}
+
+func (s *Server) handleLocalList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	listing, err := listLocalFiles(request.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, listing)
 }
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {

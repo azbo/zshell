@@ -1,8 +1,26 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
-import { deleteHost, downloadFile, listFiles, loadHosts, saveHost, uploadFile } from "./api";
-import type { AuthType, Host, Platform, RemoteEntry, RemoteListing, SocketMessage } from "./types";
+import {
+  deleteHost,
+  downloadFile,
+  downloadFileToLocal,
+  listFiles,
+  listLocalFiles,
+  loadHosts,
+  saveHost,
+  uploadFile,
+  uploadLocalFilePath,
+} from "./api";
+import type {
+  AuthType,
+  Host,
+  LocalListing,
+  Platform,
+  RemoteEntry,
+  RemoteListing,
+  SocketMessage,
+} from "./types";
 
 type TerminalTab = {
   id: string;
@@ -25,18 +43,30 @@ type Elements = {
   closeEditorButton: HTMLButtonElement;
   hostForm: HTMLFormElement;
   formMode: HTMLSpanElement;
+  passwordHelp: HTMLElement;
+  passwordState: HTMLSpanElement;
+  clearPasswordButton: HTMLButtonElement;
   deleteHostButton: HTMLButtonElement;
   tabBar: HTMLDivElement;
   terminalStage: HTMLDivElement;
   fileSplitter: HTMLDivElement;
   statusBanner: HTMLDivElement;
   workspaceTitle: HTMLHeadingElement;
-  filePath: HTMLSpanElement;
-  fileBody: HTMLDivElement;
-  fileRefreshButton: HTMLButtonElement;
-  fileUpButton: HTMLButtonElement;
-  fileDownloadButton: HTMLButtonElement;
+  transferStatus: HTMLDivElement;
+  localPath: HTMLSpanElement;
+  localStatus: HTMLSpanElement;
+  localBody: HTMLDivElement;
+  localRefreshButton: HTMLButtonElement;
+  localUpButton: HTMLButtonElement;
+  remotePath: HTMLSpanElement;
+  remoteStatus: HTMLSpanElement;
+  remoteBody: HTMLDivElement;
+  remoteRefreshButton: HTMLButtonElement;
+  remoteUpButton: HTMLButtonElement;
+  uploadSelectionButton: HTMLButtonElement;
+  downloadSelectionButton: HTMLButtonElement;
   fileUploadButton: HTMLButtonElement;
+  fileDownloadButton: HTMLButtonElement;
   fileInput: HTMLInputElement;
   footerStatus: HTMLSpanElement;
 };
@@ -55,8 +85,14 @@ type State = {
   fileLoadingHostId: string;
   fileErrorHostId: string;
   fileError: string;
+  localListing: LocalListing | null;
+  localSelection: string;
+  localLoading: boolean;
+  localError: string;
   filePaneHeight: number;
   draggingFilePane: boolean;
+  passwordClearArmed: boolean;
+  transferStatus: string;
 };
 
 export function bootstrap() {
@@ -72,7 +108,7 @@ export function bootstrap() {
         <nav class="chrome-menu">
           <span>会话</span>
           <span>编辑</span>
-          <span>搜索</span>
+          <span>传输</span>
           <span>工具</span>
           <span>窗口</span>
           <span>帮助</span>
@@ -118,32 +154,73 @@ export function bootstrap() {
           <section id="terminal-stage" class="terminal-stage">
             <div class="empty-state">
               <h3>选择一台主机并连接</h3>
-              <p>左侧像 WindTerm 一样管理会话树，中间保留多标签终端，底部为真实 SFTP 文件面板。</p>
+              <p>左侧管理会话树，中间保留多标签终端，底部保留本地 / 远程双栏文件面板。</p>
             </div>
           </section>
           <div id="file-splitter" class="file-splitter" role="separator" aria-orientation="horizontal"></div>
           <section class="file-pane">
             <div class="file-pane-head">
               <div>
-                <p class="eyebrow">File Panel</p>
-                <h3>文件面板</h3>
+                <p class="eyebrow">Commander</p>
+                <h3>双栏文件面板</h3>
               </div>
               <div class="file-toolbar">
-                <button id="file-up" class="mini-button" type="button">上级</button>
-                <button id="file-refresh" class="mini-button" type="button">刷新</button>
-                <button id="file-upload" class="mini-button" type="button">上传</button>
-                <button id="file-download" class="mini-button" type="button">下载</button>
+                <button id="upload-selection" class="mini-button" type="button">上传选中 →</button>
+                <button id="download-selection" class="mini-button" type="button">← 下载选中</button>
+                <button id="file-upload" class="mini-button ghost" type="button">选择文件上传</button>
+                <button id="file-download" class="mini-button ghost" type="button">浏览器下载</button>
               </div>
             </div>
-            <div class="file-path-strip">
-              <span id="file-path" class="path-pill">未连接</span>
+            <div class="file-transfer-bar">
+              <div id="transfer-status" class="transfer-status">本地与远程双栏管理</div>
             </div>
-            <div class="file-grid-head">
-              <span>名称</span>
-              <span>类型 / 大小</span>
-              <span>修改时间 / 说明</span>
+            <div class="file-columns">
+              <section class="file-column">
+                <div class="file-column-head">
+                  <div>
+                    <p class="eyebrow">Local</p>
+                    <h4>本地</h4>
+                  </div>
+                  <div class="file-toolbar">
+                    <button id="local-up" class="mini-button" type="button">上级</button>
+                    <button id="local-refresh" class="mini-button" type="button">刷新</button>
+                  </div>
+                </div>
+                <div class="file-path-strip">
+                  <span id="local-path" class="path-pill">加载中</span>
+                  <span id="local-status" class="column-status">就绪</span>
+                </div>
+                <div class="file-grid-head">
+                  <span>名称</span>
+                  <span>类型 / 大小</span>
+                  <span>修改时间 / 说明</span>
+                </div>
+                <div id="local-body" class="file-grid-body"></div>
+              </section>
+
+              <section class="file-column">
+                <div class="file-column-head">
+                  <div>
+                    <p class="eyebrow">Remote</p>
+                    <h4>远程</h4>
+                  </div>
+                  <div class="file-toolbar">
+                    <button id="remote-up" class="mini-button" type="button">上级</button>
+                    <button id="remote-refresh" class="mini-button" type="button">刷新</button>
+                  </div>
+                </div>
+                <div class="file-path-strip">
+                  <span id="remote-path" class="path-pill">未连接</span>
+                  <span id="remote-status" class="column-status">等待会话</span>
+                </div>
+                <div class="file-grid-head">
+                  <span>名称</span>
+                  <span>类型 / 大小</span>
+                  <span>修改时间 / 说明</span>
+                </div>
+                <div id="file-body" class="file-grid-body"></div>
+              </section>
             </div>
-            <div id="file-body" class="file-grid-body"></div>
             <input id="file-input" type="file" hidden />
           </section>
         </main>
@@ -158,7 +235,11 @@ export function bootstrap() {
           </div>
           <div class="editor-mode">
             <span id="form-mode">新增</span>
-            <small>密码可选保存到系统凭据库，未保存时仅在当前会话缓存</small>
+            <small id="password-help">密码优先在设置中维护；不保存到系统凭据库时，仅缓存当前应用会话。</small>
+            <div class="credential-strip">
+              <span id="password-state" class="mini-meta">未配置密码</span>
+              <button id="clear-password" class="mini-button ghost" type="button">清除已保存密码</button>
+            </div>
           </div>
           <form id="host-form" class="host-form">
             <label><span>名称</span><input name="name" required /></label>
@@ -183,7 +264,7 @@ export function bootstrap() {
                 </select>
               </label>
             </div>
-            <label><span>密码</span><input name="password" type="password" placeholder="留空则保持当前已保存密码" /></label>
+            <label><span>密码</span><input name="password" type="password" placeholder="保存后写入系统凭据库或缓存到当前应用" /></label>
             <label class="check-row"><input name="savePassword" type="checkbox" /><span>保存密码到系统凭据库</span></label>
             <label><span>密钥路径</span><input name="keyPath" placeholder="C:\\Users\\me\\.ssh\\id_rsa" /></label>
             <label><span>默认 Shell</span><input name="defaultShell" placeholder="bash -l / powershell.exe -NoLogo" /></label>
@@ -217,8 +298,14 @@ export function bootstrap() {
     fileLoadingHostId: "",
     fileErrorHostId: "",
     fileError: "",
-    filePaneHeight: 250,
+    localListing: null,
+    localSelection: "",
+    localLoading: false,
+    localError: "",
+    filePaneHeight: 270,
     draggingFilePane: false,
+    passwordClearArmed: false,
+    transferStatus: "",
   };
 
   bindUI(elements, state);
@@ -226,6 +313,7 @@ export function bootstrap() {
   window.addEventListener("resize", () => resizeActiveTerminal(state));
 
   void refreshHosts(elements, state);
+  void loadLocalListing(elements, state, "");
   renderEditor(elements, state);
   renderFilePanel(elements, state);
 }
@@ -242,18 +330,30 @@ function queryElements(): Elements {
     closeEditorButton: document.querySelector<HTMLButtonElement>("#close-editor")!,
     hostForm: document.querySelector<HTMLFormElement>("#host-form")!,
     formMode: document.querySelector<HTMLSpanElement>("#form-mode")!,
+    passwordHelp: document.querySelector<HTMLElement>("#password-help")!,
+    passwordState: document.querySelector<HTMLSpanElement>("#password-state")!,
+    clearPasswordButton: document.querySelector<HTMLButtonElement>("#clear-password")!,
     deleteHostButton: document.querySelector<HTMLButtonElement>("#delete-host")!,
     tabBar: document.querySelector<HTMLDivElement>("#tab-bar")!,
     terminalStage: document.querySelector<HTMLDivElement>("#terminal-stage")!,
     fileSplitter: document.querySelector<HTMLDivElement>("#file-splitter")!,
     statusBanner: document.querySelector<HTMLDivElement>("#status-banner")!,
     workspaceTitle: document.querySelector<HTMLHeadingElement>("#workspace-title")!,
-    filePath: document.querySelector<HTMLSpanElement>("#file-path")!,
-    fileBody: document.querySelector<HTMLDivElement>("#file-body")!,
-    fileRefreshButton: document.querySelector<HTMLButtonElement>("#file-refresh")!,
-    fileUpButton: document.querySelector<HTMLButtonElement>("#file-up")!,
-    fileDownloadButton: document.querySelector<HTMLButtonElement>("#file-download")!,
+    transferStatus: document.querySelector<HTMLDivElement>("#transfer-status")!,
+    localPath: document.querySelector<HTMLSpanElement>("#local-path")!,
+    localStatus: document.querySelector<HTMLSpanElement>("#local-status")!,
+    localBody: document.querySelector<HTMLDivElement>("#local-body")!,
+    localRefreshButton: document.querySelector<HTMLButtonElement>("#local-refresh")!,
+    localUpButton: document.querySelector<HTMLButtonElement>("#local-up")!,
+    remotePath: document.querySelector<HTMLSpanElement>("#remote-path")!,
+    remoteStatus: document.querySelector<HTMLSpanElement>("#remote-status")!,
+    remoteBody: document.querySelector<HTMLDivElement>("#file-body")!,
+    remoteRefreshButton: document.querySelector<HTMLButtonElement>("#remote-refresh")!,
+    remoteUpButton: document.querySelector<HTMLButtonElement>("#remote-up")!,
+    uploadSelectionButton: document.querySelector<HTMLButtonElement>("#upload-selection")!,
+    downloadSelectionButton: document.querySelector<HTMLButtonElement>("#download-selection")!,
     fileUploadButton: document.querySelector<HTMLButtonElement>("#file-upload")!,
+    fileDownloadButton: document.querySelector<HTMLButtonElement>("#file-download")!,
     fileInput: document.querySelector<HTMLInputElement>("#file-input")!,
     footerStatus: document.querySelector<HTMLSpanElement>("#footer-status")!,
   };
@@ -281,6 +381,7 @@ function bindUI(elements: Elements, state: State) {
     state.search = elements.hostSearch.value.trim().toLowerCase();
     renderHosts(elements, state);
   });
+
   elements.fileSplitter.addEventListener("mousedown", (event) => {
     state.draggingFilePane = true;
     document.body.classList.add("resizing");
@@ -290,7 +391,7 @@ function bindUI(elements: Elements, state: State) {
     if (!state.draggingFilePane) {
       return;
     }
-    const nextHeight = Math.max(140, Math.min(window.innerHeight * 0.5, window.innerHeight - event.clientY - 28));
+    const nextHeight = Math.max(180, Math.min(window.innerHeight * 0.55, window.innerHeight - event.clientY - 28));
     state.filePaneHeight = Math.round(nextHeight);
     applyPaneHeight(state.filePaneHeight);
     resizeActiveTerminal(state);
@@ -303,22 +404,42 @@ function bindUI(elements: Elements, state: State) {
     document.body.classList.remove("resizing");
   });
 
-  elements.fileRefreshButton.addEventListener("click", () => {
+  elements.localRefreshButton.addEventListener("click", () => {
+    void loadLocalListing(elements, state, currentLocalPath(state));
+  });
+  elements.localUpButton.addEventListener("click", () => {
+    void loadLocalListing(elements, state, localParentPath(currentLocalPath(state)));
+  });
+  elements.remoteRefreshButton.addEventListener("click", () => {
     const host = activeOrSelectedHost(state);
     if (host) {
       void loadFileListing(elements, state, host, currentRemotePath(state, host));
     }
   });
-  elements.fileUpButton.addEventListener("click", () => {
+  elements.remoteUpButton.addEventListener("click", () => {
     const host = activeOrSelectedHost(state);
     if (host) {
       void loadFileListing(elements, state, host, remoteParentPath(currentRemotePath(state, host)));
     }
   });
-  elements.fileUploadButton.addEventListener("click", () => {
-    if (activeOrSelectedHost(state)) {
-      elements.fileInput.click();
+  elements.uploadSelectionButton.addEventListener("click", () => {
+    const host = activeOrSelectedHost(state);
+    if (host) {
+      void uploadSelectedLocalPath(elements, state, host);
     }
+  });
+  elements.downloadSelectionButton.addEventListener("click", () => {
+    const host = activeOrSelectedHost(state);
+    if (host) {
+      void downloadSelectedRemotePath(elements, state, host);
+    }
+  });
+  elements.fileUploadButton.addEventListener("click", () => {
+    const host = activeOrSelectedHost(state);
+    if (!host) {
+      return;
+    }
+    elements.fileInput.click();
   });
   elements.fileDownloadButton.addEventListener("click", () => {
     const host = activeOrSelectedHost(state);
@@ -336,6 +457,34 @@ function bindUI(elements: Elements, state: State) {
     elements.fileInput.value = "";
   });
 
+  elements.clearPasswordButton.addEventListener("click", () => {
+    state.passwordClearArmed = true;
+    if (state.editingId) {
+      state.passwordCache.delete(state.editingId);
+    }
+    setInput(elements.hostForm, "password", "");
+    setCheckbox(elements.hostForm, "savePassword", false);
+    renderEditor(elements, state);
+  });
+
+  const passwordInput = elements.hostForm.elements.namedItem("password");
+  const savePasswordInput = elements.hostForm.elements.namedItem("savePassword");
+  const authTypeInput = elements.hostForm.elements.namedItem("authType");
+  if (passwordInput instanceof HTMLInputElement) {
+    passwordInput.addEventListener("input", () => {
+      if (passwordInput.value.trim() !== "") {
+        state.passwordClearArmed = false;
+      }
+      renderEditor(elements, state);
+    });
+  }
+  if (savePasswordInput instanceof HTMLInputElement) {
+    savePasswordInput.addEventListener("change", () => renderEditor(elements, state));
+  }
+  if (authTypeInput instanceof HTMLSelectElement) {
+    authTypeInput.addEventListener("change", () => renderEditor(elements, state));
+  }
+
   elements.deleteHostButton.addEventListener("click", async () => {
     const hostID = state.editingId;
     if (!hostID) {
@@ -348,6 +497,7 @@ function bindUI(elements: Elements, state: State) {
       }
       state.editingId = "";
       state.editorOpen = false;
+      state.passwordClearArmed = false;
       state.passwordCache.delete(hostID);
       state.fileListings.delete(hostID);
       state.fileSelection.delete(hostID);
@@ -372,9 +522,17 @@ function bindUI(elements: Elements, state: State) {
       keyPath: String(formData.get("keyPath") || "").trim(),
       defaultShell: String(formData.get("defaultShell") || "").trim(),
     };
+    const cachePassword = payload.authType === "password" && payload.password !== "" && !payload.savePassword;
+    const clearPassword = state.passwordClearArmed;
 
     try {
       const saved = await saveHost(payload, state.editingId);
+      if (cachePassword) {
+        state.passwordCache.set(saved.id, payload.password || "");
+      } else if (clearPassword || payload.authType === "key") {
+        state.passwordCache.delete(saved.id);
+      }
+      state.passwordClearArmed = false;
       state.editingId = saved.id;
       state.selectedHostId = saved.id;
       state.editorOpen = false;
@@ -396,6 +554,7 @@ async function refreshHosts(elements: Elements, state: State) {
   renderHosts(elements, state);
   renderTabs(elements, state);
   renderFilePanel(elements, state);
+  renderEditor(elements, state);
 }
 
 function renderHosts(elements: Elements, state: State) {
@@ -471,6 +630,7 @@ function filteredHosts(state: State) {
 function openNewEditor(elements: Elements, state: State) {
   state.editingId = "";
   state.editorOpen = true;
+  state.passwordClearArmed = false;
   elements.formMode.textContent = "新增";
   setInput(elements.hostForm, "name", "");
   setInput(elements.hostForm, "address", "");
@@ -489,6 +649,7 @@ function fillForm(elements: Elements, state: State, host: Host) {
   state.selectedHostId = host.id;
   state.editingId = host.id;
   state.editorOpen = true;
+  state.passwordClearArmed = false;
   elements.formMode.textContent = "编辑";
   setInput(elements.hostForm, "name", host.name);
   setInput(elements.hostForm, "address", host.address);
@@ -507,6 +668,64 @@ function fillForm(elements: Elements, state: State, host: Host) {
 
 function renderEditor(elements: Elements, state: State) {
   elements.editorPanel.classList.toggle("open", state.editorOpen);
+  renderCredentialState(elements, state);
+}
+
+function renderCredentialState(elements: Elements, state: State) {
+  const editingHost = state.hosts.find((host) => host.id === state.editingId);
+  const authType = getSelectValue(elements.hostForm, "authType");
+  const password = getInputValue(elements.hostForm, "password").trim();
+  const savePassword = getCheckboxValue(elements.hostForm, "savePassword");
+  const hasSavedPassword = Boolean(editingHost?.hasPassword) && !state.passwordClearArmed;
+  const passwordField = elements.hostForm.elements.namedItem("password");
+
+  if (passwordField instanceof HTMLInputElement) {
+    passwordField.placeholder = hasSavedPassword
+      ? "留空则保持当前已保存密码，填写则覆盖"
+      : "保存后写入系统凭据库或缓存到当前应用";
+  }
+
+  if (authType !== "password") {
+    elements.passwordState.textContent = "密钥认证";
+    elements.passwordState.className = "mini-meta neutral";
+    elements.passwordHelp.textContent = "使用密钥文件进行认证，密码凭据不会参与连接。";
+    elements.clearPasswordButton.disabled = true;
+    return;
+  }
+
+  elements.clearPasswordButton.disabled = !editingHost?.hasPassword && password === "";
+
+  if (password !== "" && savePassword) {
+    elements.passwordState.textContent = "保存后写入系统凭据库";
+    elements.passwordState.className = "mini-meta accent";
+    elements.passwordHelp.textContent = "当前输入的密码会在保存后写入系统凭据库，下次连接不再弹窗。";
+    return;
+  }
+
+  if (password !== "") {
+    elements.passwordState.textContent = "保存后缓存到当前应用";
+    elements.passwordState.className = "mini-meta warn";
+    elements.passwordHelp.textContent = "当前输入的密码不会写入系统凭据库，但本次应用运行期间可直接连接。";
+    return;
+  }
+
+  if (hasSavedPassword && savePassword) {
+    elements.passwordState.textContent = "系统凭据已保存";
+    elements.passwordState.className = "mini-meta accent";
+    elements.passwordHelp.textContent = "保持当前配置即可继续使用系统凭据库中的密码。";
+    return;
+  }
+
+  if (editingHost?.hasPassword && !savePassword) {
+    elements.passwordState.textContent = "保存后清除系统凭据";
+    elements.passwordState.className = "mini-meta danger";
+    elements.passwordHelp.textContent = "当前未勾选“保存密码”，保存配置后会清除系统凭据库中的现有密码。";
+    return;
+  }
+
+  elements.passwordState.textContent = "未配置密码";
+  elements.passwordState.className = "mini-meta neutral";
+  elements.passwordHelp.textContent = "未保存密码时，连接会回退到一次性弹窗输入。";
 }
 
 function setInput(form: HTMLFormElement, name: string, value: string) {
@@ -523,6 +742,20 @@ function setCheckbox(form: HTMLFormElement, name: string, checked: boolean) {
   }
 }
 
+function getInputValue(form: HTMLFormElement, name: string) {
+  const element = form.elements.namedItem(name);
+  return element instanceof HTMLInputElement ? element.value : "";
+}
+
+function getSelectValue(form: HTMLFormElement, name: string) {
+  const element = form.elements.namedItem(name);
+  return element instanceof HTMLSelectElement ? element.value : "";
+}
+
+function getCheckboxValue(form: HTMLFormElement, name: string) {
+  const element = form.elements.namedItem(name);
+  return element instanceof HTMLInputElement && element.type === "checkbox" ? element.checked : false;
+}
 async function connectHost(elements: Elements, state: State, host: Host) {
   const existingTab = findTabByHost(state, host.id);
   if (existingTab) {
@@ -586,7 +819,7 @@ async function connectHost(elements: Elements, state: State, host: Host) {
   });
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data) as SocketMessage;
-    handleSocketMessage(elements, state, tabId, message);
+    void handleSocketMessage(elements, state, tabId, message);
   });
   socket.addEventListener("close", () => {
     tab.term.writeln("\r\n\x1b[31m[session closed]\x1b[0m");
@@ -706,7 +939,7 @@ function closeTab(elements: Elements, state: State, id: string) {
   elements.terminalStage.innerHTML = `
     <div class="empty-state">
       <h3>选择一台主机并连接</h3>
-      <p>左侧像 WindTerm 一样管理会话树，中间保留多标签终端，底部为文件面板预留区。</p>
+      <p>左侧管理会话树，中间保留多标签终端，底部保留本地 / 远程双栏文件面板。</p>
     </div>
   `;
   elements.statusBanner.textContent = "等待连接";
@@ -718,14 +951,59 @@ function closeTab(elements: Elements, state: State, id: string) {
 }
 
 function renderFilePanel(elements: Elements, state: State) {
+  renderLocalPanel(elements, state);
+  renderRemotePanel(elements, state);
+  renderTransferActions(elements, state);
+}
+
+function renderLocalPanel(elements: Elements, state: State) {
+  elements.localPath.textContent = currentLocalPath(state) || "加载中";
+  elements.localUpButton.disabled = state.localLoading || currentLocalPath(state) === "";
+  elements.localRefreshButton.disabled = state.localLoading;
+
+  if (state.localLoading) {
+    elements.localStatus.textContent = "读取中";
+    elements.localBody.innerHTML = `<div class="file-empty">正在读取本地目录...</div>`;
+    return;
+  }
+
+  if (state.localError) {
+    elements.localStatus.textContent = "错误";
+    elements.localBody.innerHTML = `<div class="file-error">${escapeHTML(state.localError)}</div>`;
+    return;
+  }
+
+  if (!state.localListing) {
+    elements.localStatus.textContent = "等待初始化";
+    elements.localBody.innerHTML = `<div class="file-empty">正在准备本地文件面板...</div>`;
+    return;
+  }
+
+  elements.localStatus.textContent = state.localSelection ? "已选中" : "就绪";
+  if (state.localListing.entries.length === 0) {
+    elements.localBody.innerHTML = `<div class="file-empty">当前目录为空。</div>`;
+    return;
+  }
+
+  elements.localBody.innerHTML = renderFileRows(state.localListing.entries, state.localSelection);
+  bindFileRows(elements.localBody, state.localListing, (path) => {
+    state.localSelection = path;
+    renderFilePanel(elements, state);
+  }, async (entry) => {
+    if (entry.isDir) {
+      await loadLocalListing(elements, state, entry.path);
+    }
+  });
+}
+
+function renderRemotePanel(elements: Elements, state: State) {
   const host = activeOrSelectedHost(state);
   if (!host) {
-    elements.filePath.textContent = "未连接";
-    elements.fileBody.innerHTML = `<div class="file-empty">选择主机后可浏览远程目录。</div>`;
-    elements.fileUpButton.disabled = true;
-    elements.fileRefreshButton.disabled = true;
-    elements.fileUploadButton.disabled = true;
-    elements.fileDownloadButton.disabled = true;
+    elements.remotePath.textContent = "未连接";
+    elements.remoteStatus.textContent = "等待会话";
+    elements.remoteBody.innerHTML = `<div class="file-empty">选择主机后可浏览远程目录。</div>`;
+    elements.remoteUpButton.disabled = true;
+    elements.remoteRefreshButton.disabled = true;
     return;
   }
 
@@ -735,30 +1013,66 @@ function renderFilePanel(elements: Elements, state: State) {
   const isLoading = state.fileLoadingHostId === host.id;
   const hasError = state.fileErrorHostId === host.id && state.fileError !== "";
 
-  elements.filePath.textContent = `${host.username}@${host.address}  ${currentPath}`;
-  elements.fileUpButton.disabled = currentPath === ".";
-  elements.fileRefreshButton.disabled = isLoading;
-  elements.fileUploadButton.disabled = isLoading;
-  elements.fileDownloadButton.disabled = !selectedPath || !!findEntryByPath(listing, selectedPath)?.isDir;
+  elements.remotePath.textContent = `${host.username}@${host.address}  ${currentPath}`;
+  elements.remoteUpButton.disabled = isLoading || currentPath === ".";
+  elements.remoteRefreshButton.disabled = isLoading;
 
   if (isLoading) {
-    elements.fileBody.innerHTML = `<div class="file-empty">正在读取 ${escapeHTML(currentPath)} ...</div>`;
+    elements.remoteStatus.textContent = "读取中";
+    elements.remoteBody.innerHTML = `<div class="file-empty">正在读取 ${escapeHTML(currentPath)} ...</div>`;
     return;
   }
   if (hasError) {
-    elements.fileBody.innerHTML = `<div class="file-error">${escapeHTML(state.fileError)}</div>`;
+    elements.remoteStatus.textContent = "错误";
+    elements.remoteBody.innerHTML = `<div class="file-error">${escapeHTML(state.fileError)}</div>`;
     return;
   }
   if (!listing) {
-    elements.fileBody.innerHTML = `<div class="file-empty">点击“刷新”或先建立终端连接后自动加载目录。</div>`;
+    elements.remoteStatus.textContent = "待加载";
+    elements.remoteBody.innerHTML = `<div class="file-empty">点击“刷新”或连接终端后自动加载目录。</div>`;
     return;
   }
   if (listing.entries.length === 0) {
-    elements.fileBody.innerHTML = `<div class="file-empty">当前目录为空。</div>`;
+    elements.remoteStatus.textContent = "空目录";
+    elements.remoteBody.innerHTML = `<div class="file-empty">当前目录为空。</div>`;
     return;
   }
 
-  elements.fileBody.innerHTML = listing.entries
+  elements.remoteStatus.textContent = selectedPath ? "已选中" : "就绪";
+  elements.remoteBody.innerHTML = renderFileRows(listing.entries, selectedPath);
+  bindFileRows(elements.remoteBody, listing, (path) => {
+    state.fileSelection.set(host.id, path);
+    renderFilePanel(elements, state);
+  }, async (entry) => {
+    if (entry.isDir) {
+      await loadFileListing(elements, state, host, entry.path);
+      return;
+    }
+    state.fileSelection.set(host.id, entry.path);
+    await downloadSelectedRemotePath(elements, state, host);
+  });
+}
+
+function renderTransferActions(elements: Elements, state: State) {
+  const host = activeOrSelectedHost(state);
+  const localEntry = state.localListing ? findEntryByPath(state.localListing, state.localSelection) : undefined;
+  const remoteSelection = host ? state.fileSelection.get(host.id) || "" : "";
+  const remoteEntry = host ? findEntryByPath(state.fileListings.get(host.id), remoteSelection) : undefined;
+  const remoteLoading = host ? state.fileLoadingHostId === host.id : false;
+  const defaultStatus = host
+    ? `当前会话 ${host.name}，可在本地与远程之间直接传输文件`
+    : "先选择会话，再使用双栏文件管理";
+
+  elements.uploadSelectionButton.disabled = !host || !localEntry || localEntry.isDir || state.localLoading || remoteLoading;
+  elements.downloadSelectionButton.disabled =
+    !host || !remoteEntry || remoteEntry.isDir || !state.localListing || state.localLoading || remoteLoading;
+  elements.fileUploadButton.disabled = !host || remoteLoading;
+  elements.fileDownloadButton.disabled = !host || !remoteEntry || remoteEntry.isDir;
+  elements.transferStatus.textContent = state.transferStatus || defaultStatus;
+}
+
+function renderFileRows(entries: RemoteEntry[], selectedPath: string) {
+  return entries
     .map((entry) => {
       const selectedClass = selectedPath === entry.path ? " selected" : "";
       return `
@@ -770,33 +1084,26 @@ function renderFilePanel(elements: Elements, state: State) {
       `;
     })
     .join("");
+}
 
-  for (const node of elements.fileBody.querySelectorAll<HTMLButtonElement>(".file-row-item")) {
+function bindFileRows(
+  root: HTMLDivElement,
+  listing: RemoteListing,
+  onSelect: (path: string) => void,
+  onOpen: (entry: RemoteEntry) => Promise<void>,
+) {
+  for (const node of root.querySelectorAll<HTMLButtonElement>(".file-row-item")) {
     node.addEventListener("click", () => {
-      const path = node.dataset.path || "";
-      state.fileSelection.set(host.id, path);
-      renderFilePanel(elements, state);
+      onSelect(node.dataset.path || "");
     });
     node.addEventListener("dblclick", () => {
       const path = node.dataset.path || "";
-      if (node.dataset.dir === "true") {
-        void loadFileListing(elements, state, host, path);
-        return;
+      const entry = findEntryByPath(listing, path);
+      if (entry) {
+        void onOpen(entry);
       }
-      state.fileSelection.set(host.id, path);
-      void downloadSelectedFile(state, host, path);
     });
   }
-}
-
-function row(name: string, type: string, note: string) {
-  return `
-    <div class="file-row">
-      <span>${escapeHTML(name)}</span>
-      <span>${escapeHTML(type)}</span>
-      <span>${escapeHTML(note)}</span>
-    </div>
-  `;
 }
 
 function syncWorkspace(elements: Elements, state: State, tab: TerminalTab) {
@@ -837,6 +1144,25 @@ function findTabByHost(state: State, hostID: string) {
   return undefined;
 }
 
+async function loadLocalListing(elements: Elements, state: State, localPath: string) {
+  state.localLoading = true;
+  state.localError = "";
+  renderFilePanel(elements, state);
+
+  try {
+    const listing = await listLocalFiles(localPath);
+    state.localListing = listing;
+    if (state.localSelection && !listing.entries.some((entry) => entry.path === state.localSelection)) {
+      state.localSelection = "";
+    }
+  } catch (error) {
+    state.localError = toMessage(error);
+  } finally {
+    state.localLoading = false;
+    renderFilePanel(elements, state);
+  }
+}
+
 async function loadFileListing(
   elements: Elements,
   state: State,
@@ -872,17 +1198,74 @@ async function loadFileListing(
   }
 }
 
+async function uploadSelectedLocalPath(elements: Elements, state: State, host: Host) {
+  const localEntry = state.localListing ? findEntryByPath(state.localListing, state.localSelection) : undefined;
+  if (!localEntry || localEntry.isDir) {
+    return;
+  }
+
+  const password = await ensurePassword(host, state);
+  if (host.authType === "password" && password === "") {
+    return;
+  }
+
+  state.transferStatus = `正在上传 ${localEntry.name} 到 ${host.name}`;
+  renderFilePanel(elements, state);
+
+  try {
+    await uploadLocalFilePath(host.id, currentRemotePath(state, host), password, localEntry.path);
+    state.transferStatus = `已上传 ${localEntry.name}`;
+    await loadFileListing(elements, state, host, currentRemotePath(state, host));
+  } catch (error) {
+    state.transferStatus = `上传失败：${toMessage(error)}`;
+    window.alert(toMessage(error));
+    renderFilePanel(elements, state);
+  }
+}
+
+async function downloadSelectedRemotePath(elements: Elements, state: State, host: Host) {
+  const selectedPath = state.fileSelection.get(host.id) || "";
+  const remoteEntry = findEntryByPath(state.fileListings.get(host.id), selectedPath);
+  if (!remoteEntry || remoteEntry.isDir || !state.localListing) {
+    return;
+  }
+
+  const password = await ensurePassword(host, state);
+  if (host.authType === "password" && password === "") {
+    return;
+  }
+
+  state.transferStatus = `正在下载 ${remoteEntry.name} 到本地`;
+  renderFilePanel(elements, state);
+
+  try {
+    const result = await downloadFileToLocal(host.id, remoteEntry.path, password, currentLocalPath(state));
+    state.transferStatus = `已下载到 ${result.path}`;
+    await loadLocalListing(elements, state, currentLocalPath(state));
+  } catch (error) {
+    state.transferStatus = `下载失败：${toMessage(error)}`;
+    window.alert(toMessage(error));
+    renderFilePanel(elements, state);
+  }
+}
+
 async function uploadSelectedFile(elements: Elements, state: State, host: Host, remotePath: string, file: File) {
   const password = await ensurePassword(host, state);
   if (host.authType === "password" && password === "") {
     return;
   }
 
+  state.transferStatus = `正在上传 ${file.name} 到 ${host.name}`;
+  renderFilePanel(elements, state);
+
   try {
     await uploadFile(host.id, remotePath, password, file);
+    state.transferStatus = `已上传 ${file.name}`;
     await loadFileListing(elements, state, host, remotePath);
   } catch (error) {
+    state.transferStatus = `上传失败：${toMessage(error)}`;
     window.alert(toMessage(error));
+    renderFilePanel(elements, state);
   }
 }
 
@@ -931,11 +1314,15 @@ function applyPaneHeight(height: number) {
   document.documentElement.style.setProperty("--file-pane-height", `${height}px`);
 }
 
+function currentLocalPath(state: State) {
+  return state.localListing?.path || "";
+}
+
 function currentRemotePath(state: State, host: Host) {
   return state.fileListings.get(host.id)?.path || ".";
 }
 
-function findEntryByPath(listing: RemoteListing | undefined, targetPath: string) {
+function findEntryByPath(listing: RemoteListing | undefined | null, targetPath: string) {
   return listing?.entries.find((entry) => entry.path === targetPath);
 }
 
@@ -948,6 +1335,30 @@ function sendMessage(socket: WebSocket, payload: SocketMessage) {
 function socketURL(path: string) {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
   return `${scheme}://${location.host}${path}`;
+}
+
+function localParentPath(currentPath: string) {
+  if (!currentPath) {
+    return "";
+  }
+  const trimmed = currentPath.replace(/[\\/]+$/, "");
+  if (trimmed === "" || trimmed === "/") {
+    return currentPath;
+  }
+  if (/^[A-Za-z]:$/.test(trimmed)) {
+    return `${trimmed}\\`;
+  }
+
+  const slashIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (slashIndex < 0) {
+    return currentPath;
+  }
+
+  const parent = trimmed.slice(0, slashIndex) || trimmed.slice(0, 1);
+  if (/^[A-Za-z]:$/.test(parent)) {
+    return `${parent}\\`;
+  }
+  return parent || currentPath;
 }
 
 function remoteParentPath(currentPath: string) {

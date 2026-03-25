@@ -39,3 +39,9 @@ export type RemoteListing = {
   path: string;
   entries: RemoteEntry[];
 };
+
+export type LocalListing = RemoteListing;
+
+export type LocalTransferResult = {
+  path: string;
+};
